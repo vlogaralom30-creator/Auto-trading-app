@@ -28,18 +28,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          cache-read-only: false
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x gradlew
 
       - name: Prepare Keystore & Environment
         run: |
@@ -49,13 +47,13 @@ jobs:
             echo "Decoded debug.keystore from base64"
           fi
           
-          # If debug.keystore still doesn't exist, generate a standard one
+          # If debug.keystore still doesn't exist, generate a standard debug keystore
           if [ ! -f "debug.keystore" ]; then
             keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
             echo "Generated new debug.keystore"
           fi
 
-          # Ensure .env exists with placeholder if not provided
+          # Ensure .env file exists
           if [ ! -f ".env" ] && [ -f ".env.example" ]; then
             cp .env.example .env
           elif [ ! -f ".env" ]; then
@@ -63,31 +61,18 @@ jobs:
           fi
 
       - name: Run Unit Tests
-        run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x gradlew
-            ./gradlew testDebugUnitTest --stacktrace
-          else
-            gradle testDebugUnitTest --stacktrace
-          fi
+        run: ./gradlew testDebugUnitTest --stacktrace
 
       - name: Build Debug APK
-        run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x gradlew
-            ./gradlew assembleDebug --stacktrace
-          else
-            gradle assembleDebug --stacktrace
-          fi
+        run: ./gradlew assembleDebug --stacktrace
 
-      - name: Find & Rename Output APK
+      - name: Find & Prepare Output APK
         id: find_apk
         run: |
           APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
           if [ -n "$APK_PATH" ]; then
             echo "Found APK at: $APK_PATH"
             cp "$APK_PATH" app/build/outputs/apk/debug/Naxxivo-ChartMind-AutoTrader.apk
-            echo "apk_path=app/build/outputs/apk/debug/Naxxivo-ChartMind-AutoTrader.apk" >> $GITHUB_OUTPUT
           else
             echo "Error: No APK found!"
             exit 1
