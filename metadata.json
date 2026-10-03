@@ -1,0 +1,7 @@
+{
+  "name": "ChartMind",
+  "description": "Trading-focused browser with real-time on-device chart analysis, customizable candlestick pattern rules, interactive overlay canvas, and trade journal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

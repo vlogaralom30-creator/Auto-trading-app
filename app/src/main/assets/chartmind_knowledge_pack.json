@@ -1,0 +1,410 @@
+{
+  "schema_version": "1.0",
+  "name": "ChartMind Knowledge Pack",
+  "disclaimer": "All outputs are probabilities, never guarantees. No auto-trading.",
+
+  "confidence": {
+    "base": 0.5,
+    "max_cap": 0.78,
+    "min_to_signal": 0.6,
+    "method": "logistic(sum(signed_weight_i * quality_i))",
+    "calibration": "When a rule has >=30 journal results, replace its prior weight with its measured win rate (see learning)."
+  },
+
+  "multi_timeframe": {
+    "scan_order": ["15m", "5m", "1m"],
+    "roles": {
+      "15m": "trend direction + major support/resistance",
+      "5m": "setup / pattern",
+      "1m": "entry timing"
+    },
+    "min_timeframes_agree": 2,
+    "rule": "If 15m trend conflicts with signal direction, subtract 0.15 from score; if 15m and 5m both agree, add 0.10.",
+    "visible_candles_target": [60, 90],
+    "auto_view": {
+      "enabled": true,
+      "steps": [
+        "set_timeframe(tf)",
+        "wait_for_chart_stable(600ms)",
+        "fit_chart(visible_candles_target)",
+        "capture_bitmap",
+        "analyze"
+      ],
+      "methods": ["site_js_click_by_selector", "webview_dispatch_wheel_or_pinch"],
+      "note": "Only inside the app's own WebView. Selectors differ per site; verify in DevTools and keep them in site_profiles, never hardcode."
+    }
+  },
+
+  "site_profiles": {
+    "tradingview": {
+      "timeframe_selector": "VERIFY_IN_DEVTOOLS",
+      "zoom_method": "wheel_event_on_chart_canvas",
+      "candle_colors": { "up": "#26A69A", "down": "#EF5350" }
+    },
+    "quotex": {
+      "timeframe_selector": "VERIFY_IN_DEVTOOLS",
+      "zoom_method": "pinch_gesture",
+      "candle_colors": { "up": "#0FAF59", "down": "#FF6251" }
+    },
+    "exness": {
+      "timeframe_selector": "VERIFY_IN_DEVTOOLS",
+      "zoom_method": "wheel_event_on_chart_canvas",
+      "candle_colors": { "up": "#26A69A", "down": "#EF5350" }
+    },
+    "calibration": "User can override colors on the calibration screen. Colors above are only starting guesses."
+  },
+
+  "features": {
+    "range": "high - low",
+    "body": "abs(close - open)",
+    "body_ratio": "body / range",
+    "upper_wick": "high - max(open, close)",
+    "lower_wick": "min(open, close) - low",
+    "atr": "average range of last 14 candles",
+    "trend_lookback": 10,
+    "swing_strength": 3
+  },
+
+  "trend_rules": [
+    {
+      "id": "trend_up",
+      "when": "last 2 swing highs rising AND last 2 swing lows rising",
+      "label": "UP"
+    },
+    {
+      "id": "trend_down",
+      "when": "last 2 swing highs falling AND last 2 swing lows falling",
+      "label": "DOWN"
+    },
+    {
+      "id": "sideways",
+      "when": "swing highs and lows within 0.8*ATR band for 10+ candles",
+      "label": "SIDEWAYS"
+    },
+    {
+      "id": "ema_bias",
+      "when": "EMA20 > EMA50 and price > EMA20 = UP bias; reverse = DOWN bias",
+      "weight": 0.05
+    }
+  ],
+
+  "support_resistance": {
+    "build": "cluster swing highs/lows whose prices are within 0.25*ATR",
+    "min_touches": 2,
+    "zone_half_height": "0.2*ATR",
+    "strength": "touches + 0.5 * rejections(wick > 50% of range) ",
+    "near_level": "abs(price - level) <= 0.5*ATR",
+    "breakout": "2 consecutive closes beyond level by >= 0.3*ATR",
+    "fakeout": "wick beyond level by >= 0.2*ATR but close back inside the zone",
+    "retest": "after breakout, price returns to the level and holds = continuation, weight +0.08",
+    "round_numbers": "optional: treat .00 and .50 levels as weak extra zones"
+  },
+
+  "patterns": [
+    {
+      "id": "hammer",
+      "name": "Hammer",
+      "direction": "UP",
+      "detect": "lower_wick >= 2*body AND upper_wick <= 0.15*range AND body_ratio <= 0.35",
+      "context_required": "trend = DOWN AND near support",
+      "weight_with_context": 0.1,
+      "weight_without_context": 0.0,
+      "notes": "Without context ignore it."
+    },
+    {
+      "id": "shooting_star",
+      "name": "Shooting Star",
+      "direction": "DOWN",
+      "detect": "upper_wick >= 2*body AND lower_wick <= 0.15*range AND body_ratio <= 0.35",
+      "context_required": "trend = UP AND near resistance",
+      "weight_with_context": 0.1,
+      "weight_without_context": 0.0
+    },
+    {
+      "id": "bull_engulfing",
+      "name": "Bullish Engulfing",
+      "direction": "UP",
+      "detect": "prev is down candle AND current is up candle AND current body fully covers prev body AND current body >= 1.2*prev body",
+      "context_required": "near support OR trend = DOWN exhausted",
+      "weight_with_context": 0.12,
+      "weight_without_context": 0.03
+    },
+    {
+      "id": "bear_engulfing",
+      "name": "Bearish Engulfing",
+      "direction": "DOWN",
+      "detect": "prev is up candle AND current is down candle AND current body fully covers prev body AND current body >= 1.2*prev body",
+      "context_required": "near resistance OR trend = UP exhausted",
+      "weight_with_context": 0.12,
+      "weight_without_context": 0.03
+    },
+    {
+      "id": "morning_star",
+      "name": "Morning Star",
+      "direction": "UP",
+      "detect": "c1 big down body, c2 small body (body_ratio<=0.3) gapping or sitting low, c3 up candle closing above c1 midpoint",
+      "context_required": "trend = DOWN AND near support",
+      "weight_with_context": 0.13,
+      "weight_without_context": 0.02
+    },
+    {
+      "id": "evening_star",
+      "name": "Evening Star",
+      "direction": "DOWN",
+      "detect": "c1 big up body, c2 small body (body_ratio<=0.3) sitting high, c3 down candle closing below c1 midpoint",
+      "context_required": "trend = UP AND near resistance",
+      "weight_with_context": 0.13,
+      "weight_without_context": 0.02
+    },
+    {
+      "id": "pin_bar_bull",
+      "name": "Bullish Pin Bar",
+      "direction": "UP",
+      "detect": "lower_wick >= 0.66*range AND body in upper third",
+      "context_required": "wick pierces support and closes back above it",
+      "weight_with_context": 0.12,
+      "weight_without_context": 0.0
+    },
+    {
+      "id": "pin_bar_bear",
+      "name": "Bearish Pin Bar",
+      "direction": "DOWN",
+      "detect": "upper_wick >= 0.66*range AND body in lower third",
+      "context_required": "wick pierces resistance and closes back below it",
+      "weight_with_context": 0.12,
+      "weight_without_context": 0.0
+    },
+    {
+      "id": "tweezer_bottom",
+      "name": "Tweezer Bottom",
+      "direction": "UP",
+      "detect": "two candles with lows within 0.05*ATR, first down second up",
+      "context_required": "near support",
+      "weight_with_context": 0.08,
+      "weight_without_context": 0.0
+    },
+    {
+      "id": "tweezer_top",
+      "name": "Tweezer Top",
+      "direction": "DOWN",
+      "detect": "two candles with highs within 0.05*ATR, first up second down",
+      "context_required": "near resistance",
+      "weight_with_context": 0.08,
+      "weight_without_context": 0.0
+    },
+    {
+      "id": "inside_bar",
+      "name": "Inside Bar",
+      "direction": "BREAKOUT",
+      "detect": "current high < prev high AND current low > prev low",
+      "context_required": "trade only the break of mother bar in direction of higher timeframe trend",
+      "weight_with_context": 0.07,
+      "weight_without_context": 0.0
+    },
+    {
+      "id": "doji",
+      "name": "Doji",
+      "direction": "NEUTRAL",
+      "detect": "body_ratio <= 0.1",
+      "effect": "Reduces confidence of continuation by 0.05; adds 0.03 to reversal signals at S/R. Never a signal alone."
+    },
+    {
+      "id": "marubozu",
+      "name": "Marubozu (momentum)",
+      "direction": "WITH_CANDLE",
+      "detect": "body_ratio >= 0.85",
+      "context_required": "closes beyond a level (breakout) OR trend continuation",
+      "weight_with_context": 0.08,
+      "weight_without_context": 0.0
+    },
+    {
+      "id": "three_soldiers",
+      "name": "Three White Soldiers / Three Black Crows",
+      "direction": "WITH_CANDLES",
+      "detect": "3 consecutive same-color candles, each opening within previous body and closing near its high/low",
+      "context_required": "not already extended more than 3*ATR",
+      "weight_with_context": 0.08,
+      "weight_without_context": 0.02
+    }
+  ],
+
+  "confluence_scoring": {
+    "formula": "score = sum(direction_sign * weight * quality); p_up = 1/(1+exp(-k*score)); k = 6",
+    "quality": "0.5 to 1.0 based on how clean the pattern geometry is and how strong the S/R zone is",
+    "components": [
+      { "name": "pattern_in_context", "range": [0.0, 0.14] },
+      { "name": "support_resistance_position", "range": [0.0, 0.12] },
+      { "name": "trend_alignment_current_tf", "range": [0.0, 0.08] },
+      { "name": "higher_tf_alignment", "range": [-0.15, 0.1] },
+      { "name": "breakout_retest_or_fakeout", "range": [0.0, 0.1] },
+      { "name": "taught_rules_match", "range": [-0.2, 0.2] },
+      { "name": "momentum_ema_rsi", "range": [-0.05, 0.05] }
+    ],
+    "output": {
+      "signal": "UP if p_up >= min_to_signal; DOWN if (1-p_up) >= min_to_signal; else NEUTRAL",
+      "confidence": "min(max(p_up, 1-p_up), confidence.max_cap)",
+      "reasons": "top 3 contributing components in plain words"
+    }
+  },
+
+  "no_trade_filters": [
+    "trend = SIDEWAYS and price is in the middle 50% of the range",
+    "latest candle range > 3*ATR (news spike)",
+    "ATR below 0.3 * average ATR of last 100 candles (dead market)",
+    "signal direction is against a strong higher timeframe trend and no fakeout confirmation",
+    "price is inside a strong S/R zone with no confirmation candle yet",
+    "fewer than 30 candles visible",
+    "3 losses in a row (cooldown 30 min)",
+    "daily signal limit reached",
+    "user-flagged news time window"
+  ],
+
+  "expiry_suggestion": {
+    "1m_chart": "1m to 3m",
+    "5m_chart": "5m to 15m",
+    "15m_chart": "15m to 45m",
+    "rule": "Expiry roughly 1 to 3 candles of the chart timeframe."
+  },
+
+  "taught_rule_schema": {
+    "id": "string",
+    "name": "string",
+    "conditions": {
+      "all": [
+        { "feature": "pattern", "op": "eq", "value": "hammer" },
+        { "feature": "near_support", "op": "eq", "value": true },
+        { "feature": "trend", "op": "eq", "value": "DOWN" }
+      ]
+    },
+    "outcome": "UP | DOWN",
+    "weight": 0.1,
+    "prior_strength": 10,
+    "winCount": 0,
+    "lossCount": 0,
+    "source": "builtin | user"
+  },
+
+  "sample_schema": {
+    "id": "string",
+    "screenshot_path": "string",
+    "features": "feature vector at the time of capture",
+    "label": "UP | DOWN",
+    "notes": "string",
+    "site": "string",
+    "pair": "string",
+    "timeframe": "string"
+  },
+
+  "builtin_rules": [
+    {
+      "id": "r1",
+      "name": "Hammer at support after downtrend",
+      "conditions": { "all": [
+        { "feature": "pattern", "op": "eq", "value": "hammer" },
+        { "feature": "near_support", "op": "eq", "value": true },
+        { "feature": "trend", "op": "eq", "value": "DOWN" }
+      ] },
+      "outcome": "UP", "weight": 0.1
+    },
+    {
+      "id": "r2",
+      "name": "Shooting star at resistance after uptrend",
+      "conditions": { "all": [
+        { "feature": "pattern", "op": "eq", "value": "shooting_star" },
+        { "feature": "near_resistance", "op": "eq", "value": true },
+        { "feature": "trend", "op": "eq", "value": "UP" }
+      ] },
+      "outcome": "DOWN", "weight": 0.1
+    },
+    {
+      "id": "r3",
+      "name": "Bullish engulfing at support",
+      "conditions": { "all": [
+        { "feature": "pattern", "op": "eq", "value": "bull_engulfing" },
+        { "feature": "near_support", "op": "eq", "value": true }
+      ] },
+      "outcome": "UP", "weight": 0.12
+    },
+    {
+      "id": "r4",
+      "name": "Bearish engulfing at resistance",
+      "conditions": { "all": [
+        { "feature": "pattern", "op": "eq", "value": "bear_engulfing" },
+        { "feature": "near_resistance", "op": "eq", "value": true }
+      ] },
+      "outcome": "DOWN", "weight": 0.12
+    },
+    {
+      "id": "r5",
+      "name": "Breakout above resistance with retest holding",
+      "conditions": { "all": [
+        { "feature": "breakout_up", "op": "eq", "value": true },
+        { "feature": "retest_holds", "op": "eq", "value": true }
+      ] },
+      "outcome": "UP", "weight": 0.1
+    },
+    {
+      "id": "r6",
+      "name": "Breakdown below support with retest failing",
+      "conditions": { "all": [
+        { "feature": "breakout_down", "op": "eq", "value": true },
+        { "feature": "retest_holds", "op": "eq", "value": true }
+      ] },
+      "outcome": "DOWN", "weight": 0.1
+    },
+    {
+      "id": "r7",
+      "name": "Fakeout above resistance (rejection)",
+      "conditions": { "all": [
+        { "feature": "fakeout_up", "op": "eq", "value": true }
+      ] },
+      "outcome": "DOWN", "weight": 0.11
+    },
+    {
+      "id": "r8",
+      "name": "Fakeout below support (rejection)",
+      "conditions": { "all": [
+        { "feature": "fakeout_down", "op": "eq", "value": true }
+      ] },
+      "outcome": "UP", "weight": 0.11
+    },
+    {
+      "id": "r9",
+      "name": "Trend pullback to EMA20 in uptrend",
+      "conditions": { "all": [
+        { "feature": "trend", "op": "eq", "value": "UP" },
+        { "feature": "higher_tf_trend", "op": "eq", "value": "UP" },
+        { "feature": "price_at_ema20", "op": "eq", "value": true },
+        { "feature": "bullish_confirmation_candle", "op": "eq", "value": true }
+      ] },
+      "outcome": "UP", "weight": 0.1
+    },
+    {
+      "id": "r10",
+      "name": "Trend pullback to EMA20 in downtrend",
+      "conditions": { "all": [
+        { "feature": "trend", "op": "eq", "value": "DOWN" },
+        { "feature": "higher_tf_trend", "op": "eq", "value": "DOWN" },
+        { "feature": "price_at_ema20", "op": "eq", "value": true },
+        { "feature": "bearish_confirmation_candle", "op": "eq", "value": true }
+      ] },
+      "outcome": "DOWN", "weight": 0.1
+    }
+  ],
+
+  "learning": {
+    "on_result": "winCount or lossCount += 1 for every rule that contributed to the signal",
+    "measured_win_rate": "(win + 1) / (win + loss + 2)",
+    "blend": "effective_win_rate = (prior_win_rate * prior_strength + measured_win_rate * n) / (prior_strength + n)",
+    "weight_from_win_rate": "weight = (effective_win_rate - 0.5) * 0.5",
+    "disable_rule": "if n >= 30 and measured_win_rate < 0.48, disable rule and tell the user",
+    "per_context_stats": "also track win rate per (site, pair, timeframe, session) and show best/worst contexts",
+    "overfit_guard": "never let a single user sample change a weight by more than 0.02"
+  },
+
+  "validation": {
+    "backtest": "Run detectors on saved screenshots with known outcomes; report per-pattern hit rate and sample size.",
+    "demo_phase": "Require at least 150 demo signals logged before the app shows a 'ready' badge.",
+    "breakeven_note": "With 80-90% payout, break-even win rate is about 53-56%. Judge the system against that number, not against 98%."
+  }
+}
