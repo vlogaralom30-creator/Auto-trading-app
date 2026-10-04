@@ -84,3 +84,21 @@ gradle :app:testDebugUnitTest
 ```bash
 gradle :app:assembleDebug
 ```
+
+---
+
+## 🚀 Easy GitHub Actions 1-Click APK Builder
+
+This repository comes pre-configured with an automated GitHub Actions workflow to build APKs directly in the cloud without needing local Android Studio:
+
+### How to Build & Download APK from GitHub:
+1. **Push to GitHub** or go to your repository on GitHub.
+2. Click on the **Actions** tab.
+3. Select **Build Android APK** from the left sidebar.
+4. Click **Run workflow** -> choose build type (`debug`, `release`, or `all`) -> click **Run workflow**.
+5. When the build finishes (takes ~1-2 minutes):
+   - Click on the completed run.
+   - Scroll down to the **Artifacts** section at the bottom.
+   - Click **`Naxxivo-Browser-APK`** to download the ready-to-install `.apk` directly to your computer or phone!
+6. **Releases on Tag:** When you create or push a Git tag starting with `v` (e.g. `v1.0.0`), GitHub Actions will automatically compile the APK and attach it directly to a new GitHub Release.
+

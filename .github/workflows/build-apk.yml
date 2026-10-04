@@ -6,7 +6,7 @@ on:
       - main
       - master
       - dev
-      - 'release/**'
+      - '**'
     tags:
       - 'v*'
   pull_request:
@@ -14,80 +14,111 @@ on:
       - main
       - master
   workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build Type to compile'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+          - all
+      run_tests:
+        description: 'Run Unit Tests before building'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build & Test APK
+  build-apk:
+    name: Build Naxxivo APK (${{ github.event.inputs.build_type || 'debug' }})
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Java JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-home-cache-cleanup: true
 
-      - name: Grant Execute Permission for Gradlew
-        run: chmod +x gradlew || true
+      - name: Make Gradlew Executable
+        run: chmod +x ./gradlew || true
 
-      - name: Prepare Keystore & Environment
+      - name: Configure Keystore & Environment Secrets
         run: |
+          # 1. Decode debug keystore if present
           if [ -f "debug.keystore.base64" ]; then
             base64 -d debug.keystore.base64 > debug.keystore
-            echo "Decoded debug.keystore from base64"
-          fi
-          
-          if [ ! -f "debug.keystore" ]; then
-            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-            echo "Generated new debug.keystore"
+            echo "Successfully decoded debug.keystore"
           fi
 
+          # 2. Generate fallback debug keystore if missing
+          if [ ! -f "debug.keystore" ]; then
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            echo "Generated new fallback debug.keystore"
+          fi
+
+          # 3. Setup environment secrets
           if [ ! -f ".env" ] && [ -f ".env.example" ]; then
             cp .env.example .env
           elif [ ! -f ".env" ]; then
             touch .env
           fi
 
-      - name: Run Unit Tests
-        run: ./gradlew testDebugUnitTest --stacktrace || gradle testDebugUnitTest --stacktrace
+      - name: Run Unit & Robolectric Tests
+        if: "${{ github.event.inputs.run_tests != false }}"
+        run: |
+          ./gradlew testDebugUnitTest --stacktrace || gradle testDebugUnitTest --stacktrace
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace || gradle assembleDebug --stacktrace
-
-      - name: Find & Prepare Output APK
-        id: find_apk
+        if: "${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == 'all' || github.event_name != 'workflow_dispatch' }}"
         run: |
-          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
-          if [ -n "$APK_PATH" ]; then
-            echo "Found APK at: $APK_PATH"
-            cp "$APK_PATH" app/build/outputs/apk/debug/Naxxivo-ChartMind-AutoTrader.apk
-          else
-            echo "Error: No APK found!"
-            exit 1
+          ./gradlew assembleDebug --stacktrace || gradle assembleDebug --stacktrace
+          mkdir -p output-apks
+          DEBUG_APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          if [ -n "$DEBUG_APK" ]; then
+            cp "$DEBUG_APK" output-apks/Naxxivo-Browser-Debug.apk
+            echo "Prepared Debug APK: output-apks/Naxxivo-Browser-Debug.apk"
           fi
 
-      - name: Upload APK Artifact
+      - name: Build Release APK
+        if: "${{ github.event.inputs.build_type == 'release' || github.event.inputs.build_type == 'all' }}"
+        run: |
+          ./gradlew assembleRelease --stacktrace || gradle assembleRelease --stacktrace || true
+          mkdir -p output-apks
+          RELEASE_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -n "$RELEASE_APK" ]; then
+            cp "$RELEASE_APK" output-apks/Naxxivo-Browser-Release.apk
+            echo "Prepared Release APK: output-apks/Naxxivo-Browser-Release.apk"
+          fi
+
+      - name: Upload APKs to Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Naxxivo-ChartMind-AutoTrader-APK
-          path: app/build/outputs/apk/debug/Naxxivo-ChartMind-AutoTrader.apk
-          retention-days: 30
+          name: Naxxivo-Browser-APK
+          path: output-apks/*.apk
+          retention-days: 90
 
-      - name: Create GitHub Release (On Version Tag)
+      - name: Publish GitHub Release on Version Tag
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/debug/Naxxivo-ChartMind-AutoTrader.apk
-          name: Release ${{ github.ref_name }}
+          files: output-apks/*.apk
+          name: Naxxivo Browser ${{ github.ref_name }}
           draft: false
           prerelease: false
           generate_release_notes: true

@@ -22,6 +22,7 @@ val NeonBlueMuted = Color(0x3300B0FF)
 val NeonYellow = Color(0xFFFFD600)      // Neutral / Warning
 val NeonPurple = Color(0xFF7C4DFF)      // Indicators / Overlays
 val NeonCyan = Color(0xFF00E5FF)
+val NeonOrange = Color(0xFFFF9100)      // Warning / Patterns
 
 // Text Colors
 val TextPrimary = Color(0xFFF1F5F9)

@@ -2,6 +2,10 @@ package com.example.ui.screens
 
 import android.webkit.WebView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -38,6 +42,7 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.Tab
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -77,6 +82,7 @@ import com.example.model.ChartAnalysisResult
 import com.example.model.OverlayLayerSettings
 import com.example.ui.components.ChartOverlayCanvas
 import com.example.ui.components.LayerControlsDialog
+import com.example.ui.components.PriceActionSparklineCard
 import com.example.ui.components.SignalBottomSheet
 import com.example.ui.components.TradingWebView
 import com.example.ui.theme.BackgroundDark
@@ -121,6 +127,7 @@ fun BrowserScreen(
     var pageProgress by remember { mutableIntStateOf(100) }
     var showLayersDialog by remember { mutableStateOf(false) }
     var showTabManager by remember { mutableStateOf(false) }
+    var showSparklineHud by remember { mutableStateOf(true) }
     var showSignalSheet by remember(analysisResult) { mutableStateOf(analysisResult != null) }
 
     val focusManager = LocalFocusManager.current
@@ -239,6 +246,19 @@ fun BrowserScreen(
 
                         Spacer(modifier = Modifier.width(4.dp))
 
+                        // Sparkline HUD Toggle
+                        IconButton(
+                            onClick = { showSparklineHud = !showSparklineHud },
+                            modifier = Modifier.size(32.dp).testTag("sparkline_hud_toggle_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ShowChart,
+                                contentDescription = "Sparkline Chart",
+                                tint = if (showSparklineHud && analysisResult?.candles?.isNotEmpty() == true) NeonCyan else TextSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
                         // Desktop Mode Toggle
                         IconButton(
                             onClick = { onDesktopModeToggled(!currentTab.isDesktopMode) },
@@ -318,6 +338,25 @@ fun BrowserScreen(
                             }
                         }
                     }
+                }
+            }
+
+            // Price Action Sparkline HUD with Highlighted Active Patterns
+            AnimatedVisibility(
+                visible = showSparklineHud && analysisResult?.candles?.isNotEmpty() == true,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                analysisResult?.let { res ->
+                    PriceActionSparklineCard(
+                        candles = res.candles,
+                        patterns = res.detectedPatterns,
+                        trendDirection = res.trendDirection,
+                        timeframe = res.timeframe,
+                        onPatternSelected = {
+                            showSignalSheet = true
+                        }
+                    )
                 }
             }
 
