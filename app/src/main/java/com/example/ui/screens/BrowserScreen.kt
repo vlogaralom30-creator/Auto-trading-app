@@ -31,7 +31,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.DesktopWindows
@@ -40,7 +39,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tab
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -74,8 +72,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.AccountMode
-import com.example.model.AutoTraderState
 import com.example.model.BrowserTab
 import com.example.model.ChartAnalysisResult
 import com.example.model.OverlayLayerSettings
@@ -90,7 +86,6 @@ import com.example.ui.theme.NeonBlue
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonGreen
 import com.example.ui.theme.NeonRed
-import com.example.ui.theme.NeonYellow
 import com.example.ui.theme.SurfaceCard
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
@@ -104,22 +99,21 @@ fun BrowserScreen(
     tabs: List<BrowserTab>,
     analysisResult: ChartAnalysisResult?,
     isAnalyzing: Boolean,
+    scanProgress: Float = 0f,
+    scanStatusMessage: String = "",
     layerSettings: OverlayLayerSettings,
-    accountMode: AccountMode = AccountMode.DEMO,
-    autoTraderState: AutoTraderState = AutoTraderState.Idle,
     onTabSelected: (BrowserTab) -> Unit,
     onNewTab: (String) -> Unit,
     onCloseTab: (String) -> Unit,
     onDesktopModeToggled: (Boolean) -> Unit,
     onAnalyzeRequested: (WebView) -> Unit,
-    onMtfScanRequested: (WebView) -> Unit = {},
+    onMultiTimeframeScanRequested: (WebView) -> Unit,
     onTeachQuickCapture: (WebView) -> Unit,
     onLayerSettingsChanged: (OverlayLayerSettings) -> Unit,
     onSaveToJournal: () -> Unit,
     onMarkWin: () -> Unit,
     onMarkLoss: () -> Unit,
     onClearOverlay: () -> Unit = {},
-    onKillSwitch: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -245,24 +239,6 @@ fun BrowserScreen(
 
                         Spacer(modifier = Modifier.width(4.dp))
 
-                        // Account Mode Tag (REAL / DEMO)
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (accountMode == AccountMode.REAL) NeonRed.copy(0.2f) else NeonGreen.copy(0.2f))
-                                .border(1.dp, if (accountMode == AccountMode.REAL) NeonRed else NeonGreen, RoundedCornerShape(6.dp))
-                                .padding(horizontal = 6.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = if (accountMode == AccountMode.REAL) "REAL" else "DEMO",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (accountMode == AccountMode.REAL) NeonRed else NeonGreen
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(4.dp))
-
                         // Desktop Mode Toggle
                         IconButton(
                             onClick = { onDesktopModeToggled(!currentTab.isDesktopMode) },
@@ -363,9 +339,41 @@ fun BrowserScreen(
 
                 // Transparent Overlay Canvas drawn on top of WebView
                 ChartOverlayCanvas(
-                    result = analysisResult,
+                    analysisResult = analysisResult,
                     layerSettings = layerSettings
                 )
+
+                // Multi-Timeframe Scanning Overlay Card
+                if (scanProgress > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(12.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xF0090D16))
+                            .border(1.dp, NeonCyan, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = scanStatusMessage.ifEmpty { "Scanning Multi-Timeframe..." },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NeonCyan
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            LinearProgressIndicator(
+                                progress = { scanProgress },
+                                modifier = Modifier
+                                    .width(180.dp)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp)),
+                                color = NeonCyan,
+                                trackColor = BackgroundElevated
+                            )
+                        }
+                    }
+                }
 
                 // Overlay active status pill with clear button
                 if (analysisResult != null && analysisResult.candles.isNotEmpty()) {
@@ -404,35 +412,6 @@ fun BrowserScreen(
                         }
                     }
                 }
-
-                // AutoTrader Status Pill overlay on WebView if running
-                if (autoTraderState !is AutoTraderState.Idle) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xDD090D16))
-                            .border(1.dp, NeonGreen.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(10.dp),
-                                color = NeonGreen,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "AUTOTRADER: ${autoTraderState.javaClass.simpleName.uppercase()}",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontSize = 9.sp,
-                                color = NeonGreen,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
             }
         }
 
@@ -463,7 +442,7 @@ fun BrowserScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Floating "ANALYZE" Button
+                    // Floating "ANALYZE (1m)" Button
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(18.dp))
@@ -471,11 +450,11 @@ fun BrowserScreen(
                             .clickable(enabled = !isAnalyzing) {
                                 webViewRef?.let { onAnalyzeRequested(it) }
                             }
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
                             .testTag("floating_analyze_btn"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (isAnalyzing) {
+                        if (isAnalyzing && scanProgress == 0f) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
                                 color = Color.Black,
@@ -491,31 +470,45 @@ fun BrowserScreen(
                         }
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (isAnalyzing) "SCANNING..." else "ANALYZE",
+                            text = if (isAnalyzing && scanProgress == 0f) "..." else "1M",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Black,
                             color = Color.Black
                         )
                     }
 
-                    // Floating "MTF SCAN" Button
+                    // Floating "MTF SCAN (15m/5m/1m)" Button
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(18.dp))
-                            .background(NeonCyan.copy(alpha = 0.2f))
-                            .border(1.dp, NeonCyan, RoundedCornerShape(18.dp))
+                            .background(NeonCyan)
                             .clickable(enabled = !isAnalyzing) {
-                                webViewRef?.let { onMtfScanRequested(it) }
+                                webViewRef?.let { onMultiTimeframeScanRequested(it) }
                             }
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
                             .testTag("floating_mtf_scan_btn"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        if (isAnalyzing && scanProgress > 0f) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color.Black,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "MTF Scan",
+                                tint = Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "MTF",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = NeonCyan
+                            text = if (isAnalyzing && scanProgress > 0f) "${(scanProgress * 100).toInt()}%" else "MTF SCAN",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Black,
+                            color = Color.Black
                         )
                     }
 
@@ -544,25 +537,6 @@ fun BrowserScreen(
                             modifier = Modifier.size(18.dp)
                         )
                     }
-
-                    // Floating Emergency Kill Switch if AutoTrader active
-                    if (autoTraderState !is AutoTraderState.Idle) {
-                        IconButton(
-                            onClick = onKillSwitch,
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(NeonRed)
-                                .testTag("floating_kill_switch_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Block,
-                                contentDescription = "Emergency Kill Switch",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -589,7 +563,7 @@ fun BrowserScreen(
     // Layer Controls Dialog
     if (showLayersDialog) {
         LayerControlsDialog(
-            settings = layerSettings,
+            currentSettings = layerSettings,
             onSettingsChanged = onLayerSettingsChanged,
             onDismiss = { showLayersDialog = false }
         )

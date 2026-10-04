@@ -2,11 +2,10 @@ package com.example
 
 import com.example.data.entity.RuleEntity
 import com.example.engine.RuleMatchingEngine
-import com.example.model.AutoTraderState
+import com.example.engine.TrendDetector
 import com.example.model.Candle
 import com.example.model.PatternMatchResult
 import com.example.model.SupportResistanceZone
-import com.example.model.SwingPoint
 import com.example.model.TrendDirection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -44,10 +43,11 @@ class ScoringAndStateMachineTest {
     fun testConfidenceCappedAt78Percent() {
         val candles = generateCandleSeries(35)
         val srZones = listOf(
-            SupportResistanceZone(yLevel = 175f, thickness = 6f, isSupport = true, touchCount = 3, strengthScore = 0.9f)
+            SupportResistanceZone(yLevel = 175f, halfHeight = 6f, isSupport = true, touchCount = 3, strengthScore = 0.9f)
         )
         val patterns = listOf(
             PatternMatchResult(
+                patternId = "hammer",
                 patternName = "HAMMER",
                 candleIndex = 34,
                 x = 730f,
@@ -55,6 +55,7 @@ class ScoringAndStateMachineTest {
                 direction = "UP",
                 confidence = 0.95f,
                 weight = 0.14f,
+                quality = 1.0f,
                 description = "Hammer at support",
                 hasContext = true
             )
@@ -67,13 +68,15 @@ class ScoringAndStateMachineTest {
             swings = emptyList(),
             srZones = srZones,
             trendLines = emptyList(),
-            trendDirection = TrendDirection.DOWNTREND,
-            breakoutHint = null,
-            patterns = patterns,
-            ema9 = emptyList(),
-            ema21 = emptyList(),
-            rsi = 25f,
+            trendEval = TrendDetector.TrendEvaluation(TrendDirection.DOWNTREND, "trend_down", 0.08f),
             atr = 20f,
+            breakoutHint = null,
+            isBreakout = false,
+            isFakeout = false,
+            patterns = patterns,
+            ema20 = emptyList(),
+            ema50 = emptyList(),
+            rsi = 25f,
             momentum = 0.05f,
             activeRules = emptyList()
         )
@@ -91,42 +94,66 @@ class ScoringAndStateMachineTest {
             swings = emptyList(),
             srZones = emptyList(),
             trendLines = emptyList(),
-            trendDirection = TrendDirection.SIDEWAYS,
-            breakoutHint = null,
-            patterns = emptyList(),
-            ema9 = emptyList(),
-            ema21 = emptyList(),
-            rsi = 50f,
+            trendEval = TrendDetector.TrendEvaluation(TrendDirection.SIDEWAYS, "trend_sideways", 0.0f),
             atr = 15f,
+            breakoutHint = null,
+            isBreakout = false,
+            isFakeout = false,
+            patterns = emptyList(),
+            ema20 = emptyList(),
+            ema50 = emptyList(),
+            rsi = 50f,
             momentum = 0f,
             activeRules = emptyList()
         )
 
-        assertTrue("Fewer than 20/30 candles must be blocked", result.isBlockedByFilter)
+        assertTrue("Fewer than 30 candles must be blocked", result.isBlocked)
         assertEquals("NEUTRAL", result.overallSignal)
-        assertNotNull(result.blockReason)
+        assertNotNull(result.blockedReason)
     }
 
     @Test
-    fun testStateMachineTransitions() {
-        var state: AutoTraderState = AutoTraderState.Idle
-        assertEquals("Idle", state.javaClass.simpleName)
+    fun testConfluenceScoringOutputsTop3Reasons() {
+        val candles = generateCandleSeries(35)
+        val srZones = listOf(
+            SupportResistanceZone(yLevel = 175f, halfHeight = 6f, isSupport = true, touchCount = 3, strengthScore = 0.9f)
+        )
+        val patterns = listOf(
+            PatternMatchResult(
+                patternId = "hammer",
+                patternName = "HAMMER",
+                candleIndex = 34,
+                x = 730f,
+                y = 175f,
+                direction = "UP",
+                confidence = 0.85f,
+                weight = 0.14f,
+                quality = 1.0f,
+                description = "Hammer at support",
+                hasContext = true
+            )
+        )
 
-        state = AutoTraderState.Scanning("Scanning 15m...", 10)
-        assertTrue(state is AutoTraderState.Scanning)
+        val result = RuleMatchingEngine.evaluateChart(
+            bitmapWidth = 1080,
+            bitmapHeight = 1920,
+            candles = candles,
+            swings = emptyList(),
+            srZones = srZones,
+            trendLines = emptyList(),
+            trendEval = TrendDetector.TrendEvaluation(TrendDirection.UPTREND, "trend_up", 0.08f),
+            atr = 20f,
+            breakoutHint = null,
+            isBreakout = false,
+            isFakeout = false,
+            patterns = patterns,
+            ema20 = emptyList(),
+            ema50 = emptyList(),
+            rsi = 30f,
+            momentum = 0.08f,
+            activeRules = emptyList()
+        )
 
-        state = AutoTraderState.WaitingEntry("UP", 0.74f, "Hammer at Support", listOf("Support bounce", "Oversold RSI"), 8)
-        assertTrue(state is AutoTraderState.WaitingEntry)
-
-        state = AutoTraderState.Placing("UP", 1.0, "1m")
-        assertTrue(state is AutoTraderState.Placing)
-
-        state = AutoTraderState.InTrade("T-12345", "UP", 1.0, System.currentTimeMillis(), 60, 45)
-        assertTrue(state is AutoTraderState.InTrade)
-        assertEquals(45, (state as AutoTraderState.InTrade).remainingSec)
-
-        state = AutoTraderState.Result(isWin = true, profitLoss = 0.85, newBalance = 100.85, message = "Trade WON")
-        assertTrue(state is AutoTraderState.Result)
-        assertTrue((state as AutoTraderState.Result).isWin)
+        assertTrue("Top contributing reasons should be at most 3", result.topContributingReasons.size <= 3)
     }
 }

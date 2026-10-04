@@ -37,23 +37,20 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Grant Execute Permission for Gradlew
-        run: chmod +x gradlew
+        run: chmod +x gradlew || true
 
       - name: Prepare Keystore & Environment
         run: |
-          # If debug.keystore.base64 exists, decode it
           if [ -f "debug.keystore.base64" ]; then
             base64 -d debug.keystore.base64 > debug.keystore
             echo "Decoded debug.keystore from base64"
           fi
           
-          # If debug.keystore still doesn't exist, generate a standard debug keystore
           if [ ! -f "debug.keystore" ]; then
             keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
             echo "Generated new debug.keystore"
           fi
 
-          # Ensure .env file exists
           if [ ! -f ".env" ] && [ -f ".env.example" ]; then
             cp .env.example .env
           elif [ ! -f ".env" ]; then
@@ -61,10 +58,10 @@ jobs:
           fi
 
       - name: Run Unit Tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        run: ./gradlew testDebugUnitTest --stacktrace || gradle testDebugUnitTest --stacktrace
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace || gradle assembleDebug --stacktrace
 
       - name: Find & Prepare Output APK
         id: find_apk

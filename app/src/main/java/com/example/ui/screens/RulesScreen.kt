@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -18,16 +19,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Upload
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,312 +48,383 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.example.data.entity.RuleEntity
+import com.example.data.entity.totalTrades
+import com.example.data.entity.winRate
 import com.example.ui.theme.BackgroundDark
 import com.example.ui.theme.BackgroundElevated
 import com.example.ui.theme.BorderDark
 import com.example.ui.theme.NeonBlue
+import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonGreen
 import com.example.ui.theme.NeonRed
-import com.example.ui.theme.NeonYellow
 import com.example.ui.theme.SurfaceCard
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import java.util.Locale
 
 @Composable
 fun RulesScreen(
     rules: List<RuleEntity>,
     onToggleRule: (RuleEntity) -> Unit,
-    onDeleteRule: (Long) -> Unit,
-    onExportRules: () -> String,
-    onImportRules: (String) -> Unit,
+    onDeleteRule: (RuleEntity) -> Unit,
+    onExportRules: () -> String = { "" },
+    onImportRules: (String) -> Unit = {},
+    onAddRule: (RuleEntity) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    var showAddDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
-    var showExportDialog by remember { mutableStateOf(false) }
-    var exportedJsonText by remember { mutableStateOf("") }
     var importJsonText by remember { mutableStateOf("") }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(BackgroundDark)
-            .padding(16.dp)
-            .testTag("rules_screen")
-    ) {
-        // Header & Import/Export buttons
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "RULE REPOSITORY",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = NeonBlue,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "${rules.size} Active Rules (${rules.count { it.isEnabled }} enabled)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                IconButton(
-                    onClick = {
-                        exportedJsonText = onExportRules()
-                        showExportDialog = true
-                    },
-                    modifier = Modifier.testTag("export_rules_btn")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Upload,
-                        contentDescription = "Export JSON",
-                        tint = NeonBlue
-                    )
-                }
-
-                IconButton(
-                    onClick = { showImportDialog = true },
-                    modifier = Modifier.testTag("import_rules_btn")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "Import JSON",
-                        tint = NeonGreen
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        if (rules.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "No rules configured yet. Go to Teach tab to create custom trading rules.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = TextMuted
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(rules, key = { it.id }) { rule ->
-                    RuleCard(
-                        rule = rule,
-                        onToggle = { onToggleRule(rule.copy(isEnabled = !rule.isEnabled)) },
-                        onDelete = { onDeleteRule(rule.id) }
-                    )
-                }
-            }
-        }
-    }
-
-    // Export Dialog
-    if (showExportDialog) {
-        AlertDialog(
-            onDismissRequest = { showExportDialog = false },
-            title = { Text("Export Rules (JSON)", color = NeonBlue) },
-            text = {
-                Column {
-                    Text("Copy your rules JSON backup:", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = exportedJsonText,
-                        onValueChange = {},
-                        readOnly = true,
-                        modifier = Modifier.fillMaxWidth().height(180.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-                }
+    if (showAddDialog) {
+        AddRuleDialog(
+            onSave = {
+                onAddRule(it)
+                showAddDialog = false
             },
-            confirmButton = {
-                Button(
-                    onClick = { showExportDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonBlue, contentColor = Color.Black)
-                ) {
-                    Text("Done")
-                }
-            },
-            containerColor = BackgroundElevated
+            onDismiss = { showAddDialog = false }
         )
     }
 
-    // Import Dialog
     if (showImportDialog) {
-        AlertDialog(
-            onDismissRequest = { showImportDialog = false },
-            title = { Text("Import Rules from JSON", color = NeonGreen) },
-            text = {
-                Column {
-                    Text("Paste rule JSON array below:", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-                    Spacer(modifier = Modifier.height(8.dp))
+        Dialog(onDismissRequest = { showImportDialog = false }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, BorderDark, RoundedCornerShape(12.dp)),
+                colors = CardDefaults.cardColors(containerColor = SurfaceCard)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "IMPORT RULES JSON",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = NeonCyan,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
                     OutlinedTextField(
                         value = importJsonText,
                         onValueChange = { importJsonText = it },
-                        modifier = Modifier.fillMaxWidth().height(180.dp),
-                        placeholder = { Text("[ { \"name\": \"...\" } ]") },
+                        label = { Text("Paste JSON array of rules") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary
                         )
                     )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (importJsonText.isNotBlank()) {
-                            onImportRules(importJsonText)
-                            importJsonText = ""
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        OutlinedButton(onClick = { showImportDialog = false }) {
+                            Text("Cancel", color = TextSecondary)
                         }
-                        showImportDialog = false
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                if (importJsonText.isNotBlank()) {
+                                    onImportRules(importJsonText)
+                                    Toast.makeText(context, "Rules imported successfully", Toast.LENGTH_SHORT).show()
+                                    showImportDialog = false
+                                    importJsonText = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
+                        ) {
+                            Text("Import", color = BackgroundDark, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(BackgroundDark)
+            .testTag("rules_screen")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "STRATEGY RULES & LEARNING",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = NeonBlue,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Active rules feed confluence scoring. Win/loss updates adjust weights.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Action row: Export & Import
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        val exported = onExportRules()
+                        if (exported.isNotBlank()) {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("ChartMind Rules", exported)
+                            clipboard?.setPrimaryClip(clip)
+                            Toast.makeText(context, "Rules JSON copied to clipboard (${rules.size} rules)", Toast.LENGTH_SHORT).show()
+                        }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonGreen, contentColor = Color.Black)
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan)
                 ) {
-                    Text("Import Rules")
+                    Icon(Icons.Default.Download, contentDescription = "Export", modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Export JSON", fontSize = 12.sp)
                 }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { showImportDialog = false }) {
-                    Text("Cancel")
+
+                OutlinedButton(
+                    onClick = { showImportDialog = true },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonBlue)
+                ) {
+                    Icon(Icons.Default.Upload, contentDescription = "Import", modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Import JSON", fontSize = 12.sp)
                 }
-            },
-            containerColor = BackgroundElevated
-        )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (rules.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("No rules configured. Tap + to add or import rules.", color = TextMuted)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(rules, key = { it.id }) { rule ->
+                        RuleItemCard(
+                            rule = rule,
+                            onToggle = { onToggleRule(rule) },
+                            onDelete = { onDeleteRule(rule) }
+                        )
+                    }
+                }
+            }
+        }
+
+        FloatingActionButton(
+            onClick = { showAddDialog = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(20.dp)
+                .testTag("add_rule_fab"),
+            containerColor = NeonCyan,
+            contentColor = BackgroundDark
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Add Rule")
+        }
     }
 }
 
 @Composable
-private fun RuleCard(
+private fun RuleItemCard(
     rule: RuleEntity,
     onToggle: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val isUp = rule.outcome.equals("UP", ignoreCase = true)
-    val outcomeColor = if (isUp) NeonGreen else NeonRed
-
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, BorderDark, RoundedCornerShape(12.dp)),
+            .border(1.dp, if (rule.isEnabled) BorderDark else Color(0x33EF4444), RoundedCornerShape(12.dp)),
         colors = CardDefaults.cardColors(containerColor = SurfaceCard),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(CircleShape)
-                            .background(outcomeColor.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
+                // Direction Badge
+                val isUp = rule.outcome.equals("UP", ignoreCase = true)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (isUp) NeonGreen.copy(alpha = 0.2f) else NeonRed.copy(alpha = 0.2f))
+                        .border(1.dp, if (isUp) NeonGreen else NeonRed, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = if (isUp) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                            if (isUp) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
                             contentDescription = rule.outcome,
-                            tint = outcomeColor,
-                            modifier = Modifier.size(16.dp)
+                            tint = if (isUp) NeonGreen else NeonRed,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = rule.outcome,
+                            color = if (isUp) NeonGreen else NeonRed,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
+                }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(8.dp))
 
+                // Source badge: Builtin vs User
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(BackgroundElevated)
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                ) {
                     Text(
-                        text = rule.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        text = rule.source.uppercase(Locale.US),
+                        fontSize = 9.sp,
+                        color = if (rule.source == "builtin") NeonCyan else NeonBlue,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
 
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Enabled Toggle Switch
                 Switch(
                     checked = rule.isEnabled,
                     onCheckedChange = { onToggle() },
                     colors = SwitchDefaults.colors(
-                        checkedThumbColor = NeonBlue,
-                        checkedTrackColor = NeonBlue.copy(0.4f)
+                        checkedThumbColor = NeonCyan,
+                        checkedTrackColor = NeonCyan.copy(alpha = 0.4f),
+                        uncheckedThumbColor = TextMuted,
+                        uncheckedTrackColor = BackgroundElevated
                     )
                 )
+
+                if (rule.source != "builtin") {
+                    IconButton(onClick = onDelete) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete",
+                            tint = NeonRed.copy(alpha = 0.8f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            // Criteria tags
+            // Rule Name
+            Text(
+                text = rule.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (rule.isEnabled) TextPrimary else TextMuted
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Context badges
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                TagPill(rule.patternType)
-                TagPill("Trend: ${rule.requiredTrend}")
-                if (rule.requireNearSupport) TagPill("Near Support")
-                if (rule.requireNearResistance) TagPill("Near Resistance")
+                ContextChip(text = "Pattern: ${rule.patternType}")
+                if (rule.requiredTrend != "ANY") {
+                    ContextChip(text = "Trend: ${rule.requiredTrend}")
+                }
+                if (rule.requireNearSupport) {
+                    ContextChip(text = "@ Support", color = NeonGreen)
+                }
+                if (rule.requireNearResistance) {
+                    ContextChip(text = "@ Resistance", color = NeonRed)
+                }
             }
 
-            if (rule.notes.isNotBlank()) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = rule.notes,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontSize = 12.sp,
-                    color = TextSecondary
-                )
-            }
+            Spacer(modifier = Modifier.height(10.dp))
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Stats row (Win/Loss & Weight)
+            // Learning & Performance Metrics
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(BackgroundElevated)
+                    .padding(8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text("WEIGHT", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold)
                     Text(
-                        text = "Weight: ${(rule.weight * 100).toInt()}%  •  ",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = NeonBlue
-                    )
-                    Text(
-                        text = "W: ${rule.winCount} / L: ${rule.lossCount} (${rule.winRate.toInt()}% WR)",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (rule.winRate >= 60f) NeonGreen else TextSecondary
+                        text = String.format(Locale.US, "%.2f", rule.weight),
+                        fontSize = 13.sp,
+                        color = NeonCyan,
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete",
-                        tint = TextMuted,
-                        modifier = Modifier.size(18.dp)
+                Column {
+                    Text("WIN RATE", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (rule.totalTrades > 0) String.format(Locale.US, "%.1f%%", rule.winRate) else "N/A",
+                        fontSize = 13.sp,
+                        color = if (rule.winRate >= 50f) NeonGreen else NeonRed,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Column {
+                    Text("RECORD (W/L)", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "${rule.winCount}W / ${rule.lossCount}L",
+                        fontSize = 13.sp,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Column {
+                    Text("TRADES", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "${rule.totalTrades}",
+                        fontSize = 13.sp,
+                        color = TextSecondary,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
@@ -360,19 +433,140 @@ private fun RuleCard(
 }
 
 @Composable
-private fun TagPill(label: String) {
+private fun ContextChip(text: String, color: Color = NeonBlue) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(4.dp))
-            .background(BackgroundElevated)
-            .border(1.dp, BorderDark, RoundedCornerShape(4.dp))
+            .background(color.copy(alpha = 0.12f))
+            .border(1.dp, color.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
             .padding(horizontal = 6.dp, vertical = 2.dp)
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            fontSize = 9.sp,
-            color = TextSecondary
-        )
+        Text(text = text, fontSize = 10.sp, color = color, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun AddRuleDialog(
+    onSave: (RuleEntity) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var patternType by remember { mutableStateOf("HAMMER") }
+    var requiredTrend by remember { mutableStateOf("ANY") }
+    var outcome by remember { mutableStateOf("UP") }
+    var requireSupport by remember { mutableStateOf(false) }
+    var requireResistance by remember { mutableStateOf(false) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, BorderDark, RoundedCornerShape(12.dp)),
+            colors = CardDefaults.cardColors(containerColor = SurfaceCard)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "Add Custom Strategy Rule",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = NeonCyan,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Rule Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = patternType,
+                    onValueChange = { patternType = it },
+                    label = { Text("Pattern (HAMMER, ENGULFING, DOJI, PIN_BAR, CUSTOM)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = outcome,
+                    onValueChange = { outcome = it },
+                    label = { Text("Signal Outcome (UP / DOWN)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Switch(checked = requireSupport, onCheckedChange = { requireSupport = it })
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Requires Support Zone Touch", fontSize = 12.sp, color = TextPrimary)
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Switch(checked = requireResistance, onCheckedChange = { requireResistance = it })
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Requires Resistance Zone Touch", fontSize = 12.sp, color = TextPrimary)
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    OutlinedButton(onClick = onDismiss) {
+                        Text("Cancel", color = TextSecondary)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            if (name.isNotBlank()) {
+                                onSave(
+                                    RuleEntity(
+                                        ruleId = "user_${System.currentTimeMillis()}",
+                                        name = name,
+                                        patternType = patternType.uppercase(),
+                                        requiredTrend = requiredTrend.uppercase(),
+                                        requireNearSupport = requireSupport,
+                                        requireNearResistance = requireResistance,
+                                        outcome = outcome.uppercase(),
+                                        weight = 0.10f,
+                                        priorStrength = 10,
+                                        priorWeight = 0.10f,
+                                        source = "user"
+                                    )
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
+                    ) {
+                        Text("Save Rule", color = BackgroundDark, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
     }
 }

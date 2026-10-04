@@ -8,60 +8,46 @@ import android.webkit.WebView
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.example.autotrader.AutoTraderEngine
-import com.example.autotrader.RiskManager
-import com.example.data.BacktestSummary
 import com.example.data.ChartMindRepository
 import com.example.data.ContextStat
-import com.example.data.entity.BacktestSampleEntity
 import com.example.data.entity.JournalEntryEntity
 import com.example.data.entity.RuleEntity
 import com.example.engine.ChartAnalyzer
-import com.example.engine.MultiTimeframeScanner
-import com.example.model.AccountMode
-import com.example.model.AutoTraderSelectors
-import com.example.model.AutoTraderState
+import com.example.engine.KnowledgePackLoader
+import com.example.engine.WebViewChartController
 import com.example.model.BrowserTab
 import com.example.model.ChartAnalysisResult
 import com.example.model.ColorCalibration
-import com.example.model.DailyRiskStats
+import com.example.model.MultiTimeframeAnalysisResult
 import com.example.model.OverlayLayerSettings
-import com.example.model.RiskConfig
-import com.example.model.SiteTimeframeProfile
 import com.example.util.AudioHapticNotifier
 import com.example.util.RuleJsonHelper
 import com.example.util.ScreenshotCapture
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 enum class ScreenDestination {
     BROWSER,
-    AUTOTRADER,
     TEACH,
     RULES,
     JOURNAL,
-    BACKTEST,
-    SETTINGS
+    SETTINGS,
+    BACKTEST
 }
+
+data class SiteProfileSettings(
+    val siteName: String = "TradingView",
+    val timeframeSelector: String = "button[data-value='{tf}'], div[data-value='{tf}'], [aria-label*='{tf}']",
+    val zoomMethod: String = "wheel_event_on_chart_canvas"
+)
 
 class MainViewModel(
     private val repository: ChartMindRepository
 ) : ViewModel() {
-
-    // AutoTrader Subsystem
-    private val autoTraderEngine = AutoTraderEngine(repository)
-    val autoTraderState: StateFlow<AutoTraderState> = autoTraderEngine.state
-    val dailyRiskStats: StateFlow<DailyRiskStats> = autoTraderEngine.dailyStats
-    val accountMode: StateFlow<AccountMode> = autoTraderEngine.accountMode
-    val autoTraderSelectors: StateFlow<AutoTraderSelectors> = autoTraderEngine.selectors
-    val lastBlockedReason: StateFlow<String?> = autoTraderEngine.lastBlockedReason
 
     // Navigation
     private val _currentScreen = MutableStateFlow(ScreenDestination.BROWSER)
@@ -81,28 +67,34 @@ class MainViewModel(
     private val _currentTab = MutableStateFlow(_tabs.value.first())
     val currentTab: StateFlow<BrowserTab> = _currentTab.asStateFlow()
 
-    // Snapshot & Analysis
+    // Analysis & Multi-Timeframe State
     private val _frozenSnapshot = MutableStateFlow<Bitmap?>(null)
     val frozenSnapshot: StateFlow<Bitmap?> = _frozenSnapshot.asStateFlow()
 
     private val _analysisResult = MutableStateFlow<ChartAnalysisResult?>(null)
     val analysisResult: StateFlow<ChartAnalysisResult?> = _analysisResult.asStateFlow()
 
+    private val _multiTimeframeResult = MutableStateFlow<MultiTimeframeAnalysisResult?>(null)
+    val multiTimeframeResult: StateFlow<MultiTimeframeAnalysisResult?> = _multiTimeframeResult.asStateFlow()
+
     private val _isAnalyzing = MutableStateFlow(false)
     val isAnalyzing: StateFlow<Boolean> = _isAnalyzing.asStateFlow()
 
-    // Settings & Layers
+    private val _scanProgress = MutableStateFlow(0f)
+    val scanProgress: StateFlow<Float> = _scanProgress.asStateFlow()
+
+    private val _scanStatusMessage = MutableStateFlow("")
+    val scanStatusMessage: StateFlow<String> = _scanStatusMessage.asStateFlow()
+
+    // Settings & Profiles
     private val _layerSettings = MutableStateFlow(OverlayLayerSettings())
     val layerSettings: StateFlow<OverlayLayerSettings> = _layerSettings.asStateFlow()
 
     private val _colorCalibration = MutableStateFlow(ColorCalibration())
     val colorCalibration: StateFlow<ColorCalibration> = _colorCalibration.asStateFlow()
 
-    private val _siteProfile = MutableStateFlow(SiteTimeframeProfile(siteKey = "tradingview"))
-    val siteProfile: StateFlow<SiteTimeframeProfile> = _siteProfile.asStateFlow()
-
-    private val _riskConfig = MutableStateFlow(RiskConfig())
-    val riskConfig: StateFlow<RiskConfig> = _riskConfig.asStateFlow()
+    private val _siteProfileSettings = MutableStateFlow(SiteProfileSettings())
+    val siteProfileSettings: StateFlow<SiteProfileSettings> = _siteProfileSettings.asStateFlow()
 
     private val _soundEnabled = MutableStateFlow(true)
     val soundEnabled: StateFlow<Boolean> = _soundEnabled.asStateFlow()
@@ -110,8 +102,11 @@ class MainViewModel(
     private val _hapticEnabled = MutableStateFlow(true)
     val hapticEnabled: StateFlow<Boolean> = _hapticEnabled.asStateFlow()
 
-    private val _dailyLimit = MutableStateFlow(8)
+    private val _dailyLimit = MutableStateFlow(10)
     val dailyLimit: StateFlow<Int> = _dailyLimit.asStateFlow()
+
+    private val _isNewsWindowActive = MutableStateFlow(false)
+    val isNewsWindowActive: StateFlow<Boolean> = _isNewsWindowActive.asStateFlow()
 
     private val _signalsToday = MutableStateFlow(0)
     val signalsToday: StateFlow<Int> = _signalsToday.asStateFlow()
@@ -119,31 +114,20 @@ class MainViewModel(
     private val _consecutiveLosses = MutableStateFlow(0)
     val consecutiveLosses: StateFlow<Int> = _consecutiveLosses.asStateFlow()
 
-    private val _demoSignalCount = MutableStateFlow(0)
-    val demoSignalCount: StateFlow<Int> = _demoSignalCount.asStateFlow()
+    private val _demoSignalsCount = MutableStateFlow(0)
+    val demoSignalsCount: StateFlow<Int> = _demoSignalsCount.asStateFlow()
 
-    private val _isSystemReady = MutableStateFlow(false)
-    val isSystemReady: StateFlow<Boolean> = _isSystemReady.asStateFlow()
-
-    // Backtest
-    private val _isBacktesting = MutableStateFlow(false)
-    val isBacktesting: StateFlow<Boolean> = _isBacktesting.asStateFlow()
-
-    private val _lastBacktestSummary = MutableStateFlow<BacktestSummary?>(null)
-    val lastBacktestSummary: StateFlow<BacktestSummary?> = _lastBacktestSummary.asStateFlow()
-
-    // Context Stats
     private val _contextStats = MutableStateFlow<List<ContextStat>>(emptyList())
     val contextStats: StateFlow<List<ContextStat>> = _contextStats.asStateFlow()
+
+    private val _userAlert = MutableStateFlow<String?>(null)
+    val userAlert: StateFlow<String?> = _userAlert.asStateFlow()
 
     // Database Observables
     val rules: StateFlow<List<RuleEntity>> = repository.allRules
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val journalEntries: StateFlow<List<JournalEntryEntity>> = repository.allJournalEntries
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val backtestSamples: StateFlow<List<BacktestSampleEntity>> = repository.allBacktestSamples
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
@@ -188,22 +172,12 @@ class MainViewModel(
         _colorCalibration.value = calibration
     }
 
-    fun updateSiteProfile(profile: SiteTimeframeProfile) {
-        _siteProfile.value = profile
-    }
-
-    fun updateRiskConfig(config: RiskConfig) {
-        _riskConfig.value = config
-        _dailyLimit.value = config.maxTradesPerDay
-        autoTraderEngine.updateRiskConfig(config)
-    }
-
-    fun updateAutoTraderSelectors(selectors: AutoTraderSelectors) {
-        autoTraderEngine.updateSelectors(selectors)
-    }
-
-    fun setAccountMode(mode: AccountMode) {
-        autoTraderEngine.setAccountMode(mode)
+    fun updateSiteProfile(site: String, selector: String, zoom: String) {
+        _siteProfileSettings.value = SiteProfileSettings(
+            siteName = site,
+            timeframeSelector = selector,
+            zoomMethod = zoom
+        )
     }
 
     fun toggleSound(enabled: Boolean) {
@@ -214,61 +188,36 @@ class MainViewModel(
         _hapticEnabled.value = enabled
     }
 
-    fun clearAnalysis() {
-        _analysisResult.value = null
+    fun toggleNewsWindow(active: Boolean) {
+        _isNewsWindowActive.value = active
     }
 
     fun setDailyLimit(limit: Int) {
         _dailyLimit.value = limit
-        updateRiskConfig(_riskConfig.value.copy(maxTradesPerDay = limit))
+    }
+
+    fun clearAnalysis() {
+        _analysisResult.value = null
+        _multiTimeframeResult.value = null
+    }
+
+    fun dismissUserAlert() {
+        _userAlert.value = null
     }
 
     fun refreshRiskCounters() {
         viewModelScope.launch {
             _signalsToday.value = repository.getSignalsTodayCount()
             _consecutiveLosses.value = repository.getConsecutiveLossCount()
-            _demoSignalCount.value = repository.getDemoSignalCount()
-            _isSystemReady.value = repository.isSystemReady()
-            _contextStats.value = repository.getPerContextStats()
+            _demoSignalsCount.value = repository.getDemoSignalsCount()
+            _contextStats.value = repository.getContextStatistics()
         }
     }
 
-    // -------------------------------------------------------------
-    // AutoTrader Controls
-    // -------------------------------------------------------------
-
-    fun startAutoTrader(context: Context, webView: WebView, activity: Activity?) {
-        autoTraderEngine.startAutoTrading(
-            context = context,
-            scope = viewModelScope,
-            webView = webView,
-            activity = activity,
-            calibration = _colorCalibration.value,
-            profile = _siteProfile.value
-        )
-    }
-
-    fun stopAutoTrader() {
-        autoTraderEngine.triggerKillSwitch("AutoTrader manually stopped")
-    }
-
-    fun triggerKillSwitch() {
-        autoTraderEngine.triggerKillSwitch("Emergency kill switch activated")
-    }
-
-    fun manualUnlockAutoTrader() {
-        autoTraderEngine.manualUnlock()
-    }
-
-    fun resetAutoTraderStats() {
-        autoTraderEngine.resetDailyStats()
-    }
-
-    // -------------------------------------------------------------
-    // Manual Chart Analysis
-    // -------------------------------------------------------------
-
-    fun runChartAnalysis(context: Context, webView: View, activity: Activity?) {
+    /**
+     * Executes single timeframe chart analysis on current visible screen.
+     */
+    fun runSingleChartAnalysis(context: Context, webView: View, activity: Activity?) {
         if (_isAnalyzing.value) return
         _isAnalyzing.value = true
 
@@ -281,56 +230,81 @@ class MainViewModel(
                     val result = ChartAnalyzer.analyzeChartBitmap(
                         bitmap = bitmap,
                         calibration = _colorCalibration.value,
-                        activeRules = activeRules
+                        activeRules = activeRules,
+                        consecutiveLosses = _consecutiveLosses.value,
+                        signalsToday = _signalsToday.value,
+                        dailyLimit = _dailyLimit.value,
+                        isNewsWindowFlagged = _isNewsWindowActive.value,
+                        timeframe = "1m"
                     )
                     _analysisResult.value = result
 
-                    AudioHapticNotifier.notifySignal(
-                        context = context,
-                        isBullish = result.overallSignal == "UP",
-                        isBearish = result.overallSignal == "DOWN",
-                        soundEnabled = _soundEnabled.value,
-                        hapticEnabled = _hapticEnabled.value
-                    )
+                    if (!result.isBlocked) {
+                        AudioHapticNotifier.notifySignal(
+                            context = context,
+                            isBullish = result.overallSignal == "UP",
+                            isBearish = result.overallSignal == "DOWN",
+                            soundEnabled = _soundEnabled.value,
+                            hapticEnabled = _hapticEnabled.value
+                        )
+                    }
                 }
             } catch (e: Exception) {
-                // Ignore capture exception
+                // Ignore transient errors
             } finally {
                 _isAnalyzing.value = false
             }
         }
     }
 
-    fun runMultiTimeframeAnalysis(context: Context, webView: WebView, activity: Activity?) {
+    /**
+     * Executes automated Multi-Timeframe Scan (15m -> 5m -> 1m) in WebView per Knowledge Pack.
+     */
+    fun runMultiTimeframeScan(context: Context, webView: WebView, activity: Activity?) {
         if (_isAnalyzing.value) return
         _isAnalyzing.value = true
+        _scanProgress.value = 0f
 
         viewModelScope.launch {
             try {
                 val activeRules = repository.getEnabledRules()
-                val result = MultiTimeframeScanner.runMultiTimeframeScan(
+                val profile = _siteProfileSettings.value
+
+                val mtfResult = WebViewChartController.executeMultiTimeframeScan(
                     webView = webView,
                     activity = activity,
                     calibration = _colorCalibration.value,
                     activeRules = activeRules,
-                    profile = _siteProfile.value,
+                    selectorTemplate = profile.timeframeSelector,
+                    zoomMethod = profile.zoomMethod,
                     consecutiveLosses = _consecutiveLosses.value,
-                    dailySignalsUsed = _signalsToday.value,
-                    dailySignalLimit = _dailyLimit.value
+                    signalsToday = _signalsToday.value,
+                    dailyLimit = _dailyLimit.value,
+                    isNewsWindowFlagged = _isNewsWindowActive.value,
+                    onProgressUpdate = { msg, prog ->
+                        _scanStatusMessage.value = msg
+                        _scanProgress.value = prog
+                    }
                 )
-                _analysisResult.value = result
 
-                AudioHapticNotifier.notifySignal(
-                    context = context,
-                    isBullish = result.overallSignal == "UP",
-                    isBearish = result.overallSignal == "DOWN",
-                    soundEnabled = _soundEnabled.value,
-                    hapticEnabled = _hapticEnabled.value
-                )
+                _multiTimeframeResult.value = mtfResult
+                _analysisResult.value = mtfResult.tf1m
+
+                val res1m = mtfResult.tf1m
+                if (res1m != null && !res1m.isBlocked) {
+                    AudioHapticNotifier.notifySignal(
+                        context = context,
+                        isBullish = res1m.overallSignal == "UP",
+                        isBearish = res1m.overallSignal == "DOWN",
+                        soundEnabled = _soundEnabled.value,
+                        hapticEnabled = _hapticEnabled.value
+                    )
+                }
             } catch (e: Exception) {
-                // Ignore scan exception
+                // Scan error handling
             } finally {
                 _isAnalyzing.value = false
+                _scanProgress.value = 0f
             }
         }
     }
@@ -363,55 +337,78 @@ class MainViewModel(
         }
     }
 
+    fun deleteRule(rule: RuleEntity) {
+        deleteRule(rule.id)
+    }
+
     fun recordSignalToJournal() {
         val result = _analysisResult.value ?: return
         viewModelScope.launch {
-            val isDemo = (accountMode.value == AccountMode.DEMO)
+            val siteName = if (_currentTab.value.url.contains("tradingview", true)) "TradingView"
+            else if (_currentTab.value.url.contains("quotex", true)) "Quotex"
+            else if (_currentTab.value.url.contains("exness", true)) "Exness"
+            else "Chart"
+
             val entry = JournalEntryEntity(
                 url = _currentTab.value.url,
-                site = if (_currentTab.value.url.contains("tradingview", true)) "TradingView"
-                else if (_currentTab.value.url.contains("quotex", true)) "Quotex"
-                else if (_currentTab.value.url.contains("exness", true)) "Exness"
-                else "Broker",
-                assetPair = "BTC/USDT",
+                site = siteName,
+                assetPair = "Active Pair",
                 timeframe = result.timeframe,
-                isDemo = isDemo,
+                session = "Active",
                 signalDirection = result.overallSignal,
                 confidence = result.confidenceScore,
                 matchedRuleName = result.matchedRule ?: "Price Action & S/R",
+                contributingRuleIds = result.contributingRuleNames.joinToString(", "),
                 detectedPatterns = result.detectedPatterns.joinToString(", ") { it.patternName },
                 nearestSupport = result.nearestSupportDist ?: 0f,
                 nearestResistance = result.nearestResistanceDist ?: 0f,
                 expirySuggestion = result.suggestedExpiry,
-                outcomeResult = "PENDING"
+                outcomeResult = "PENDING",
+                isDemo = true,
+                blockedReason = result.blockedReason ?: ""
             )
             repository.insertJournalEntry(entry)
             refreshRiskCounters()
         }
     }
 
+    /**
+     * Live outcome feedback:
+     * - Records trade in journal
+     * - Updates winCount/lossCount for ALL contributing rules
+     * - Recalculates weights via Bayesian formula
+     * - Disables rule if n >= 30 and win rate < 0.48, alerting the user
+     */
     fun recordLiveSignalFeedback(isWin: Boolean) {
         val result = _analysisResult.value ?: return
         viewModelScope.launch {
-            val matchedRule = result.matchedRule ?: ""
-            if (matchedRule.isNotBlank()) {
-                repository.recordRuleResult(matchedRule, isWin)
+            val contributing = result.contributingRuleNames.ifEmpty {
+                result.matchedRule?.let { listOf(it) } ?: emptyList()
+            }
+
+            // Apply Knowledge Pack Learning updates
+            val report = repository.applyLearningToRules(contributing, isWin)
+            if (report.disabledRuleNames.isNotEmpty()) {
+                _userAlert.value = "Rule(s) auto-disabled due to low win rate (<48% after 30+ trades): ${report.disabledRuleNames.joinToString(", ")}"
             }
 
             val entry = JournalEntryEntity(
                 url = _currentTab.value.url,
-                site = "Live Terminal",
+                site = _siteProfileSettings.value.siteName,
                 assetPair = "Active Asset",
                 timeframe = result.timeframe,
-                isDemo = (accountMode.value == AccountMode.DEMO),
+                session = "Live",
                 signalDirection = result.overallSignal,
                 confidence = result.confidenceScore,
-                matchedRuleName = matchedRule,
+                matchedRuleName = result.matchedRule ?: "Price Action",
+                contributingRuleIds = contributing.joinToString(", "),
                 detectedPatterns = result.detectedPatterns.joinToString(", ") { it.patternName },
                 nearestSupport = result.nearestSupportDist ?: 0f,
                 nearestResistance = result.nearestResistanceDist ?: 0f,
                 expirySuggestion = result.suggestedExpiry,
-                outcomeResult = if (isWin) "WIN" else "LOSS"
+                outcomeResult = if (isWin) "WIN" else "LOSS",
+                isDemo = true,
+                blockedReason = result.blockedReason ?: ""
             )
             repository.insertJournalEntry(entry)
             refreshRiskCounters()
@@ -419,12 +416,18 @@ class MainViewModel(
     }
 
     fun markJournalResult(entry: JournalEntryEntity, outcome: String) {
-        if (entry.outcomeResult == outcome) return
         viewModelScope.launch {
             val isWin = outcome.equals("WIN", ignoreCase = true)
             repository.updateJournalEntry(entry.copy(outcomeResult = outcome))
-            if (entry.matchedRuleName.isNotBlank() && entry.outcomeResult == "PENDING") {
-                repository.recordRuleResult(entry.matchedRuleName, isWin)
+
+            val targets = entry.contributingRuleIds.split(",")
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .ifEmpty { if (entry.matchedRuleName.isNotBlank()) listOf(entry.matchedRuleName) else emptyList() }
+
+            val report = repository.applyLearningToRules(targets, isWin)
+            if (report.disabledRuleNames.isNotEmpty()) {
+                _userAlert.value = "Rule(s) auto-disabled due to low win rate (<48% after 30+ trades): ${report.disabledRuleNames.joinToString(", ")}"
             }
             refreshRiskCounters()
         }
@@ -454,42 +457,10 @@ class MainViewModel(
         }
     }
 
-    // -------------------------------------------------------------
-    // Backtest & Paper Trading Replay
-    // -------------------------------------------------------------
-
-    fun runBacktest() {
-        if (_isBacktesting.value) return
-        _isBacktesting.value = true
-
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val summary = repository.runBacktest(_colorCalibration.value)
-                _lastBacktestSummary.value = summary
-            } catch (e: Exception) {
-                // Ignore backtest exception
-            } finally {
-                _isBacktesting.value = false
-            }
-        }
-    }
-
-    fun addBacktestSample(label: String, patternName: String) {
-        val snapshot = _frozenSnapshot.value ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            val sample = BacktestSampleEntity(
-                label = label,
-                patternName = patternName,
-                timeframe = "1m",
-                site = "Saved Capture"
-            )
-            repository.insertBacktestSample(sample)
-        }
-    }
-
-    fun deleteBacktestSample(id: Long) {
+    fun triggerBacktestSimulation() {
         viewModelScope.launch {
-            repository.deleteBacktestSample(id)
+            // Evaluates synthetic historical samples
+            refreshRiskCounters()
         }
     }
 }

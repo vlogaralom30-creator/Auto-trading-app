@@ -2,7 +2,7 @@ package com.example.util
 
 import android.content.Context
 import android.media.AudioManager
-import android.media.RingtoneManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -14,65 +14,52 @@ object AudioHapticNotifier {
         context: Context,
         isBullish: Boolean,
         isBearish: Boolean,
-        soundEnabled: Boolean = true,
-        hapticEnabled: Boolean = true
+        soundEnabled: Boolean,
+        hapticEnabled: Boolean
     ) {
-        if (hapticEnabled) {
-            triggerHaptic(context, isBullish, isBearish)
+        if (soundEnabled && (isBullish || isBearish)) {
+            playSignalSound(isBullish)
         }
-        if (soundEnabled) {
-            triggerSound(context, isBullish, isBearish)
+        if (hapticEnabled && (isBullish || isBearish)) {
+            vibrateForSignal(context, isBullish)
         }
     }
 
-    private fun triggerHaptic(context: Context, isBullish: Boolean, isBearish: Boolean) {
+    fun playSignalSound(isBullish: Boolean) {
+        try {
+            val toneGenerator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
+            if (isBullish) {
+                toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
+            } else {
+                toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP2, 200)
+            }
+        } catch (_: Exception) {}
+    }
+
+    fun vibrateForSignal(context: Context, isBullish: Boolean) {
         try {
             val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                vibratorManager?.defaultVibrator
+                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vm?.defaultVibrator
             } else {
                 @Suppress("DEPRECATION")
                 context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
             } ?: return
 
+            if (!vibrator.hasVibrator()) return
+
+            val pattern = if (isBullish) {
+                longArrayOf(0, 100, 50, 150)
+            } else {
+                longArrayOf(0, 150, 50, 100)
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val timings = if (isBullish) {
-                    longArrayOf(0, 70, 60, 100) // Double rising pulse
-                } else if (isBearish) {
-                    longArrayOf(0, 120, 50, 60) // Heavy drop pulse
-                } else {
-                    longArrayOf(0, 50)
-                }
-                vibrator.vibrate(VibrationEffect.createWaveform(timings, -1))
+                vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
             } else {
                 @Suppress("DEPRECATION")
-                vibrator.vibrate(100)
+                vibrator.vibrate(pattern, -1)
             }
-        } catch (e: Exception) {
-            // Ignore vibration errors if permission or hardware absent
-        }
-    }
-
-    private fun triggerSound(context: Context, isBullish: Boolean, isBearish: Boolean) {
-        try {
-            // Play system sound effect via AudioManager to avoid ToneGenerator native timeouts
-            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-            if (audioManager != null) {
-                val effect = if (isBullish) {
-                    AudioManager.FX_KEY_CLICK
-                } else if (isBearish) {
-                    AudioManager.FX_KEYPRESS_DELETE
-                } else {
-                    AudioManager.FX_KEYPRESS_STANDARD
-                }
-                audioManager.playSoundEffect(effect, 1.0f)
-            } else {
-                val notificationUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                val ringtone = RingtoneManager.getRingtone(context.applicationContext, notificationUri)
-                ringtone?.play()
-            }
-        } catch (e: Exception) {
-            // Safe fallback
-        }
+        } catch (_: Exception) {}
     }
 }

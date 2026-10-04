@@ -14,12 +14,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Rule
-import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.CropFree
-import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.HistoryEdu
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -38,10 +39,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.ChartMindDatabase
 import com.example.data.ChartMindRepository
-import com.example.model.AccountMode
-import com.example.model.AutoTraderState
-import com.example.model.RiskConfig
-import com.example.ui.screens.AutoTraderDashboardScreen
+import com.example.model.ColorCalibration
 import com.example.ui.screens.BacktestScreen
 import com.example.ui.screens.BrowserScreen
 import com.example.ui.screens.JournalScreen
@@ -50,12 +48,11 @@ import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TeachScreen
 import com.example.ui.theme.BackgroundDark
 import com.example.ui.theme.BackgroundElevated
-import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.ChartMindTheme
 import com.example.ui.theme.NeonBlue
+import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonGreen
-import com.example.ui.theme.NeonRed
 import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextSecondary
 import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.MainViewModelFactory
 import com.example.viewmodel.ScreenDestination
@@ -67,15 +64,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            MyApplicationTheme {
+            ChartMindTheme {
                 val coroutineScope = rememberCoroutineScope()
                 val context = LocalContext.current
                 val database = ChartMindDatabase.getDatabase(context, coroutineScope)
-                val repository = ChartMindRepository(
-                    ruleDao = database.ruleDao(),
-                    journalDao = database.journalDao(),
-                    backtestDao = database.backtestDao()
-                )
+                val repository = ChartMindRepository(database.ruleDao(), database.journalDao())
 
                 val viewModel: MainViewModel = viewModel(
                     factory = MainViewModelFactory(repository)
@@ -100,35 +93,43 @@ fun ChartMindApp(
     val currentTab by viewModel.currentTab.collectAsStateWithLifecycle()
     val analysisResult by viewModel.analysisResult.collectAsStateWithLifecycle()
     val isAnalyzing by viewModel.isAnalyzing.collectAsStateWithLifecycle()
+    val scanProgress by viewModel.scanProgress.collectAsStateWithLifecycle()
+    val scanStatusMessage by viewModel.scanStatusMessage.collectAsStateWithLifecycle()
     val layerSettings by viewModel.layerSettings.collectAsStateWithLifecycle()
     val calibration by viewModel.colorCalibration.collectAsStateWithLifecycle()
-    val siteProfile by viewModel.siteProfile.collectAsStateWithLifecycle()
-    val riskConfig by viewModel.riskConfig.collectAsStateWithLifecycle()
-    val autoTraderSelectors by viewModel.autoTraderSelectors.collectAsStateWithLifecycle()
-    val autoTraderState by viewModel.autoTraderState.collectAsStateWithLifecycle()
-    val dailyRiskStats by viewModel.dailyRiskStats.collectAsStateWithLifecycle()
-    val accountMode by viewModel.accountMode.collectAsStateWithLifecycle()
-    val lastBlockedReason by viewModel.lastBlockedReason.collectAsStateWithLifecycle()
+    val siteProfiles by viewModel.siteProfileSettings.collectAsStateWithLifecycle()
     val soundEnabled by viewModel.soundEnabled.collectAsStateWithLifecycle()
     val hapticEnabled by viewModel.hapticEnabled.collectAsStateWithLifecycle()
     val dailyLimit by viewModel.dailyLimit.collectAsStateWithLifecycle()
+    val isNewsWindowActive by viewModel.isNewsWindowActive.collectAsStateWithLifecycle()
     val signalsToday by viewModel.signalsToday.collectAsStateWithLifecycle()
     val consecutiveLosses by viewModel.consecutiveLosses.collectAsStateWithLifecycle()
-    val demoSignalCount by viewModel.demoSignalCount.collectAsStateWithLifecycle()
-    val isSystemReady by viewModel.isSystemReady.collectAsStateWithLifecycle()
+    val demoSignalsCount by viewModel.demoSignalsCount.collectAsStateWithLifecycle()
     val contextStats by viewModel.contextStats.collectAsStateWithLifecycle()
     val rules by viewModel.rules.collectAsStateWithLifecycle()
     val journalEntries by viewModel.journalEntries.collectAsStateWithLifecycle()
-    val backtestSamples by viewModel.backtestSamples.collectAsStateWithLifecycle()
-    val isBacktesting by viewModel.isBacktesting.collectAsStateWithLifecycle()
-    val lastBacktestSummary by viewModel.lastBacktestSummary.collectAsStateWithLifecycle()
     val frozenSnapshot by viewModel.frozenSnapshot.collectAsStateWithLifecycle()
+    val userAlert by viewModel.userAlert.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
 
-    // Handle Android system back button: return to browser if currently on sub-screen
+    // Handle Android system back button
     BackHandler(enabled = currentScreen != ScreenDestination.BROWSER) {
         viewModel.navigateTo(ScreenDestination.BROWSER)
+    }
+
+    // Auto-disable Alert dialog
+    userAlert?.let { alertText ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissUserAlert() },
+            title = { Text("Statistical Learning Notice") },
+            text = { Text(alertText) },
+            confirmButton = {
+                Button(onClick = { viewModel.dismissUserAlert() }) {
+                    Text("Acknowledge")
+                }
+            }
+        )
     }
 
     Scaffold(
@@ -164,25 +165,24 @@ fun ChartMindApp(
                 )
 
                 NavigationBarItem(
-                    selected = currentScreen == ScreenDestination.AUTOTRADER,
-                    onClick = { viewModel.navigateTo(ScreenDestination.AUTOTRADER) },
+                    selected = currentScreen == ScreenDestination.TEACH,
+                    onClick = { viewModel.navigateTo(ScreenDestination.TEACH) },
                     icon = {
                         Icon(
-                            imageVector = Icons.Default.AutoMode,
-                            contentDescription = "AutoTrader",
-                            modifier = Modifier.size(20.dp),
-                            tint = if (autoTraderState !is AutoTraderState.Idle) NeonGreen else if (currentScreen == ScreenDestination.AUTOTRADER) NeonBlue else TextMuted
+                            imageVector = Icons.Default.CropFree,
+                            contentDescription = "Teach",
+                            modifier = Modifier.size(20.dp)
                         )
                     },
-                    label = { Text("AutoTrader", fontSize = 10.sp) },
+                    label = { Text("Teach", fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = NeonBlue,
-                        selectedTextColor = NeonBlue,
-                        indicatorColor = NeonBlue.copy(alpha = 0.15f),
+                        selectedIconColor = NeonGreen,
+                        selectedTextColor = NeonGreen,
+                        indicatorColor = NeonGreen.copy(alpha = 0.15f),
                         unselectedIconColor = TextMuted,
                         unselectedTextColor = TextMuted
                     ),
-                    modifier = Modifier.testTag("nav_autotrader_tab")
+                    modifier = Modifier.testTag("nav_teach_tab")
                 )
 
                 NavigationBarItem(
@@ -232,19 +232,22 @@ fun ChartMindApp(
 
                 NavigationBarItem(
                     selected = currentScreen == ScreenDestination.BACKTEST,
-                    onClick = { viewModel.navigateTo(ScreenDestination.BACKTEST) },
+                    onClick = {
+                        viewModel.refreshRiskCounters()
+                        viewModel.navigateTo(ScreenDestination.BACKTEST)
+                    },
                     icon = {
                         Icon(
-                            imageVector = Icons.Default.FactCheck,
+                            imageVector = Icons.Default.Science,
                             contentDescription = "Backtest",
                             modifier = Modifier.size(20.dp)
                         )
                     },
                     label = { Text("Backtest", fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = NeonBlue,
-                        selectedTextColor = NeonBlue,
-                        indicatorColor = NeonBlue.copy(alpha = 0.15f),
+                        selectedIconColor = NeonCyan,
+                        selectedTextColor = NeonCyan,
+                        indicatorColor = NeonCyan.copy(alpha = 0.15f),
                         unselectedIconColor = TextMuted,
                         unselectedTextColor = TextMuted
                     ),
@@ -286,18 +289,18 @@ fun ChartMindApp(
                         tabs = tabs,
                         analysisResult = analysisResult,
                         isAnalyzing = isAnalyzing,
+                        scanProgress = scanProgress,
+                        scanStatusMessage = scanStatusMessage,
                         layerSettings = layerSettings,
-                        accountMode = accountMode,
-                        autoTraderState = autoTraderState,
                         onTabSelected = { viewModel.selectTab(it) },
                         onNewTab = { viewModel.openNewTab(it) },
                         onCloseTab = { viewModel.closeTab(it) },
                         onDesktopModeToggled = { viewModel.toggleDesktopMode(it) },
                         onAnalyzeRequested = { webView ->
-                            viewModel.runChartAnalysis(context, webView, activity)
+                            viewModel.runSingleChartAnalysis(context, webView, activity)
                         },
-                        onMtfScanRequested = { webView ->
-                            viewModel.runMultiTimeframeAnalysis(context, webView, activity)
+                        onMultiTimeframeScanRequested = { webView ->
+                            viewModel.runMultiTimeframeScan(context, webView, activity)
                         },
                         onTeachQuickCapture = { webView ->
                             viewModel.freezeForTeachMode(webView, activity)
@@ -306,25 +309,7 @@ fun ChartMindApp(
                         onSaveToJournal = { viewModel.recordSignalToJournal() },
                         onMarkWin = { viewModel.recordLiveSignalFeedback(isWin = true) },
                         onMarkLoss = { viewModel.recordLiveSignalFeedback(isWin = false) },
-                        onClearOverlay = { viewModel.clearAnalysis() },
-                        onKillSwitch = { viewModel.triggerKillSwitch() }
-                    )
-                }
-
-                ScreenDestination.AUTOTRADER -> {
-                    AutoTraderDashboardScreen(
-                        state = autoTraderState,
-                        dailyStats = dailyRiskStats,
-                        accountMode = accountMode,
-                        lastBlockedReason = lastBlockedReason,
-                        onStartAutoTrading = {
-                            viewModel.navigateTo(ScreenDestination.BROWSER)
-                        },
-                        onStopAutoTrading = { viewModel.stopAutoTrader() },
-                        onKillSwitch = { viewModel.triggerKillSwitch() },
-                        onManualUnlock = { viewModel.manualUnlockAutoTrader() },
-                        onResetStats = { viewModel.resetAutoTraderStats() },
-                        onAccountModeChanged = { viewModel.setAccountMode(it) }
+                        onClearOverlay = { viewModel.clearAnalysis() }
                     )
                 }
 
@@ -352,7 +337,7 @@ fun ChartMindApp(
                         signalsTodayCount = signalsToday,
                         consecutiveLossCount = consecutiveLosses,
                         dailySignalLimit = dailyLimit,
-                        demoSignalCount = demoSignalCount,
+                        demoSignalsCount = demoSignalsCount,
                         contextStats = contextStats,
                         onMarkResult = { entry, outcome ->
                             viewModel.markJournalResult(entry, outcome)
@@ -363,39 +348,31 @@ fun ChartMindApp(
 
                 ScreenDestination.BACKTEST -> {
                     BacktestScreen(
-                        samples = backtestSamples,
-                        demoSignalCount = demoSignalCount,
-                        isReady = isSystemReady,
-                        isTesting = isBacktesting,
-                        lastSummary = lastBacktestSummary,
-                        currentSnapshot = frozenSnapshot,
-                        onRunBacktest = { viewModel.runBacktest() },
-                        onAddCurrentAsSample = { label, pat ->
-                            viewModel.addBacktestSample(label, pat)
-                        },
-                        onDeleteSample = { viewModel.deleteBacktestSample(it) }
+                        demoSignalsLogged = demoSignalsCount,
+                        onRunBacktest = { viewModel.triggerBacktestSimulation() }
                     )
                 }
 
                 ScreenDestination.SETTINGS -> {
                     SettingsScreen(
                         calibration = calibration,
-                        profile = siteProfile,
-                        riskConfig = riskConfig,
-                        selectors = autoTraderSelectors,
-                        accountMode = accountMode,
                         soundEnabled = soundEnabled,
                         hapticEnabled = hapticEnabled,
+                        dailyLimit = dailyLimit,
+                        isNewsWindowActive = isNewsWindowActive,
+                        currentSite = siteProfiles.siteName,
+                        timeframeSelector = siteProfiles.timeframeSelector,
+                        zoomMethod = siteProfiles.zoomMethod,
                         onCalibrationChanged = { viewModel.updateCalibration(it) },
-                        onProfileChanged = { viewModel.updateSiteProfile(it) },
-                        onRiskConfigChanged = { viewModel.updateRiskConfig(it) },
-                        onSelectorsChanged = { viewModel.updateAutoTraderSelectors(it) },
-                        onAccountModeChanged = { viewModel.setAccountMode(it) },
                         onSoundToggled = { viewModel.toggleSound(it) },
                         onHapticToggled = { viewModel.toggleHaptic(it) },
                         onDailyLimitChanged = { viewModel.setDailyLimit(it) },
+                        onNewsWindowToggled = { viewModel.toggleNewsWindow(it) },
+                        onSiteProfileChanged = { site, sel, zoom ->
+                            viewModel.updateSiteProfile(site, sel, zoom)
+                        },
                         onResetPresets = {
-                            viewModel.updateRiskConfig(RiskConfig())
+                            viewModel.updateCalibration(ColorCalibration())
                         }
                     )
                 }

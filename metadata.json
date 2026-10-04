@@ -1,7 +1,8 @@
 {
-  "name": "ChartMind",
-  "description": "Trading-focused browser with real-time on-device chart analysis, customizable candlestick pattern rules, interactive overlay canvas, and trade journal.",
+  "name": "Naxxivo ChartMind AutoTrader",
+  "description": "Automated binary trading cockpit, state machine, multi-timeframe scanner, and risk governance engine.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
-

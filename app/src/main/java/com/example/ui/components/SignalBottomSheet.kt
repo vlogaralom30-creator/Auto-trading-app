@@ -21,12 +21,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.Icon
@@ -42,7 +46,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,6 +53,7 @@ import com.example.model.ChartAnalysisResult
 import com.example.ui.theme.BackgroundElevated
 import com.example.ui.theme.BorderDark
 import com.example.ui.theme.NeonBlue
+import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonGreen
 import com.example.ui.theme.NeonGreenMuted
 import com.example.ui.theme.NeonRed
@@ -72,18 +76,20 @@ fun SignalBottomSheet(
 ) {
     val isUp = result.overallSignal == "UP"
     val isDown = result.overallSignal == "DOWN"
-    val isNeutral = result.overallSignal == "NEUTRAL"
+    val isBlocked = result.isBlocked
 
     val signalColor = when {
+        isBlocked -> NeonYellow
         isUp -> NeonGreen
         isDown -> NeonRed
-        else -> NeonYellow
+        else -> NeonCyan
     }
 
     val signalBg = when {
+        isBlocked -> Color(0x22FFD600)
         isUp -> NeonGreenMuted
         isDown -> NeonRedMuted
-        else -> Color(0x22FFD600)
+        else -> Color(0x2200E5FF)
     }
 
     val animatedProgress by animateFloatAsState(
@@ -106,7 +112,7 @@ fun SignalBottomSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
-            // Drag handle & Close
+            // Header drag bar & close
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -120,7 +126,7 @@ fun SignalBottomSheet(
                 )
 
                 Text(
-                    text = "CHARTMIND INFERENCE ENGINE",
+                    text = "CONFLUENCE SCORING ENGINE",
                     style = MaterialTheme.typography.labelSmall,
                     color = NeonBlue
                 )
@@ -138,6 +144,39 @@ fun SignalBottomSheet(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
+
+            // Blocked Banner if No-Trade Filter triggered
+            if (isBlocked && result.blockedReason != null) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, NeonYellow, RoundedCornerShape(10.dp)),
+                    colors = CardDefaults.cardColors(containerColor = NeonYellow.copy(alpha = 0.15f)),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Block, contentDescription = "Blocked", tint = NeonYellow, modifier = Modifier.size(22.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "SIGNAL BLOCKED BY NO-TRADE FILTER",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = NeonYellow
+                            )
+                            Text(
+                                text = result.blockedReason,
+                                fontSize = 11.sp,
+                                color = TextPrimary
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
 
             // Main Signal Banner & Animated Confidence Gauge
             Row(
@@ -162,6 +201,7 @@ fun SignalBottomSheet(
                         ) {
                             Icon(
                                 imageVector = when {
+                                    isBlocked -> Icons.Default.Shield
                                     isUp -> Icons.Default.ArrowUpward
                                     isDown -> Icons.Default.ArrowDownward
                                     else -> Icons.Default.Remove
@@ -177,38 +217,29 @@ fun SignalBottomSheet(
                         Column {
                             Text(
                                 text = when {
-                                    result.isBlockedByFilter -> "SIGNAL BLOCKED"
-                                    isUp -> "CONFLUENCE CALL / BUY"
-                                    isDown -> "CONFLUENCE PUT / SELL"
-                                    else -> "HOLD / NEUTRAL"
+                                    isBlocked -> "FILTER BLOCKED"
+                                    isUp -> "SIGNAL: UP (CALL)"
+                                    isDown -> "SIGNAL: DOWN (PUT)"
+                                    else -> "NEUTRAL / HOLD"
                                 },
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Black,
-                                color = if (result.isBlockedByFilter) NeonYellow else signalColor
+                                color = signalColor
                             )
 
-                            if (result.isBlockedByFilter && result.blockReason != null) {
-                                Text(
-                                    text = result.blockReason,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = NeonYellow,
-                                    maxLines = 2
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Timer,
+                                    contentDescription = "Expiry",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(14.dp)
                                 )
-                            } else {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Timer,
-                                        contentDescription = "Expiry",
-                                        tint = TextSecondary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Suggested Expiry: ${result.suggestedExpiry} (${result.timeframe})",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = TextPrimary
-                                    )
-                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Suggested Expiry: ${result.suggestedExpiry}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = TextPrimary
+                                )
                             }
                         }
                     }
@@ -223,7 +254,7 @@ fun SignalBottomSheet(
                     }
                 }
 
-                // Confidence Gauge
+                // Confidence Gauge (Cap 78%, min_to_signal 60%)
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier.size(64.dp)
@@ -248,10 +279,10 @@ fun SignalBottomSheet(
                             color = TextPrimary
                         )
                         Text(
-                            text = "CONF",
+                            text = if (isBlocked) "Blocked" else "Conf",
                             style = MaterialTheme.typography.labelSmall,
-                            fontSize = 8.sp,
-                            color = TextMuted
+                            color = TextSecondary,
+                            fontSize = 9.sp
                         )
                     }
                 }
@@ -259,103 +290,86 @@ fun SignalBottomSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Reason Pills / Detected Signals
+            // TOP 3 CONTRIBUTING REASONS
             Text(
-                text = "MATCHED SIGNALS & STRUCTURE",
+                text = "TOP 3 CONFLUENCE FACTORS",
                 style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary
+                color = NeonCyan,
+                fontWeight = FontWeight.Bold
             )
-
             Spacer(modifier = Modifier.height(4.dp))
 
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                result.reasonList.forEach { reason ->
+            val displayReasons = if (result.topContributingReasons.isNotEmpty()) {
+                result.topContributingReasons
+            } else {
+                result.reasonList.take(3)
+            }
+
+            displayReasons.forEachIndexed { idx, reason ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(SurfaceCard)
-                            .border(1.dp, BorderDark, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(NeonCyan.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = reason,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontSize = 12.sp,
-                            color = TextPrimary
-                        )
+                        Text("${idx + 1}", fontSize = 10.sp, color = NeonCyan, fontWeight = FontWeight.Bold)
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = reason,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextPrimary,
+                        maxLines = 2
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Action Row: Save to Journal & Learning Loop feedback
+            // Actions & Outcome Feedback
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedButton(
                     onClick = onSaveToJournal,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(40.dp)
-                        .testTag("save_journal_btn"),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonBlue)
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(NeonCyan)),
+                    modifier = Modifier.testTag("save_journal_btn")
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.History,
-                        contentDescription = "Journal",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Journal", style = MaterialTheme.typography.labelMedium)
+                    Icon(Icons.Default.History, contentDescription = "Journal", modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("LOG TO JOURNAL", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
 
-                ElevatedButton(
-                    onClick = onMarkWin,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(40.dp)
-                        .testTag("win_feedback_btn"),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.elevatedButtonColors(
-                        containerColor = NeonGreen,
-                        contentColor = Color.Black
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = "Win",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Win (+)", style = MaterialTheme.typography.labelLarge)
-                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ElevatedButton(
+                        onClick = onMarkWin,
+                        colors = ButtonDefaults.elevatedButtonColors(containerColor = NeonGreen.copy(alpha = 0.2f)),
+                        modifier = Modifier.testTag("quick_win_btn")
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = "Win", tint = NeonGreen, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("WIN", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
 
-                ElevatedButton(
-                    onClick = onMarkLoss,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(40.dp)
-                        .testTag("loss_feedback_btn"),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.elevatedButtonColors(
-                        containerColor = NeonRed,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Loss",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Loss (-)", style = MaterialTheme.typography.labelLarge)
+                    ElevatedButton(
+                        onClick = onMarkLoss,
+                        colors = ButtonDefaults.elevatedButtonColors(containerColor = NeonRed.copy(alpha = 0.2f)),
+                        modifier = Modifier.testTag("quick_loss_btn")
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Loss", tint = NeonRed, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("LOSS", color = NeonRed, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
                 }
             }
         }

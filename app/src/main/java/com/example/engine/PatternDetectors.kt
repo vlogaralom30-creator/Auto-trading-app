@@ -7,26 +7,31 @@ import com.example.model.SwingPoint
 import com.example.model.TrendDirection
 import kotlin.math.abs
 
-interface PatternDetector {
+interface KnowledgePackPatternDetector {
     val id: String
     val name: String
     fun detect(
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float = 15f,
-        trend: TrendDirection = TrendDirection.SIDEWAYS,
-        higherTfTrend: String = "ANY"
+        trend: TrendDirection,
+        atr: Float
     ): List<PatternMatchResult>
 }
 
+private fun isNearZone(priceY: Float, zones: List<SupportResistanceZone>, atr: Float, isSupport: Boolean): Boolean {
+    // near_level: abs(price - level) <= 0.5*ATR
+    val threshold = 0.5f * atr
+    return zones.filter { it.isSupport == isSupport }
+        .any { abs(it.yLevel - priceY) <= threshold }
+}
+
 /**
- * 1. Hammer
+ * 1. Hammer (UP)
  * detect: lower_wick >= 2*body AND upper_wick <= 0.15*range AND body_ratio <= 0.35
  * context_required: trend = DOWN AND near support
- * weight_with_context: 0.1, weight_without_context: 0.0
  */
-class HammerDetector : PatternDetector {
+class KnowledgePackHammerDetector : KnowledgePackPatternDetector {
     override val id: String = "hammer"
     override val name: String = "Hammer"
 
@@ -34,40 +39,41 @@ class HammerDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
-        if (candles.size < 2) return matches
+        if (candles.isEmpty()) return matches
 
-        for (i in 1 until candles.size) {
-            val candle = candles[i]
-            val isHammerGeom = candle.lowerWick >= (2f * candle.body) &&
-                    candle.upperWick <= (0.15f * candle.range) &&
-                    candle.bodyRatio <= 0.35f
+        for (i in candles.indices) {
+            val c = candles[i]
+            val passesShape = c.lowerWick >= (2f * c.body) &&
+                    c.upperWick <= (0.15f * c.range) &&
+                    c.bodyRatio <= 0.35f
 
-            if (isHammerGeom) {
-                val nearThreshold = if (atr > 0) 0.5f * atr else 20f
-                val nearSupport = srZones.any { it.isSupport && abs(it.yLevel - candle.lowY) <= nearThreshold }
-                val hasContext = (trend == TrendDirection.DOWNTREND || candles[i - 1].closeY > candles[i - 1].openY) && nearSupport
-
+            if (passesShape) {
+                val nearSupport = isNearZone(c.lowY, srZones, atr, isSupport = true)
+                val hasContext = trend == TrendDirection.DOWNTREND && nearSupport
                 val weight = if (hasContext) 0.10f else 0.0f
-                val confidence = if (hasContext) 0.78f else 0.60f
 
-                matches.add(
-                    PatternMatchResult(
-                        patternName = "HAMMER",
-                        candleIndex = i,
-                        x = candle.centerX,
-                        y = candle.lowY,
-                        direction = "UP",
-                        confidence = confidence,
-                        weight = weight,
-                        description = "Hammer rejection at support: lower wick >= 2*body, buyer absorption",
-                        hasContext = hasContext
+                if (hasContext || i == candles.lastIndex) {
+                    matches.add(
+                        PatternMatchResult(
+                            patternId = id,
+                            patternName = name,
+                            candleIndex = i,
+                            x = c.centerX,
+                            y = c.lowY,
+                            direction = "UP",
+                            confidence = if (hasContext) 0.85f else 0.50f,
+                            weight = weight,
+                            quality = if (c.lowerWick >= 3f * c.body) 1.0f else 0.8f,
+                            hasContext = hasContext,
+                            description = "Bullish Hammer: Long lower wick rejection at lows" +
+                                    if (hasContext) " (Aligned: Downtrend + Support Zone)" else " (Ignored: Missing context)"
+                        )
                     )
-                )
+                }
             }
         }
         return matches
@@ -75,12 +81,11 @@ class HammerDetector : PatternDetector {
 }
 
 /**
- * 2. Shooting Star
+ * 2. Shooting Star (DOWN)
  * detect: upper_wick >= 2*body AND lower_wick <= 0.15*range AND body_ratio <= 0.35
  * context_required: trend = UP AND near resistance
- * weight_with_context: 0.1, weight_without_context: 0.0
  */
-class ShootingStarDetector : PatternDetector {
+class KnowledgePackShootingStarDetector : KnowledgePackPatternDetector {
     override val id: String = "shooting_star"
     override val name: String = "Shooting Star"
 
@@ -88,40 +93,41 @@ class ShootingStarDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
-        if (candles.size < 2) return matches
+        if (candles.isEmpty()) return matches
 
-        for (i in 1 until candles.size) {
-            val candle = candles[i]
-            val isStarGeom = candle.upperWick >= (2f * candle.body) &&
-                    candle.lowerWick <= (0.15f * candle.range) &&
-                    candle.bodyRatio <= 0.35f
+        for (i in candles.indices) {
+            val c = candles[i]
+            val passesShape = c.upperWick >= (2f * c.body) &&
+                    c.lowerWick <= (0.15f * c.range) &&
+                    c.bodyRatio <= 0.35f
 
-            if (isStarGeom) {
-                val nearThreshold = if (atr > 0) 0.5f * atr else 20f
-                val nearResistance = srZones.any { !it.isSupport && abs(it.yLevel - candle.highY) <= nearThreshold }
-                val hasContext = (trend == TrendDirection.UPTREND || candles[i - 1].closeY < candles[i - 1].openY) && nearResistance
-
+            if (passesShape) {
+                val nearResistance = isNearZone(c.highY, srZones, atr, isSupport = false)
+                val hasContext = trend == TrendDirection.UPTREND && nearResistance
                 val weight = if (hasContext) 0.10f else 0.0f
-                val confidence = if (hasContext) 0.78f else 0.60f
 
-                matches.add(
-                    PatternMatchResult(
-                        patternName = "SHOOTING_STAR",
-                        candleIndex = i,
-                        x = candle.centerX,
-                        y = candle.highY,
-                        direction = "DOWN",
-                        confidence = confidence,
-                        weight = weight,
-                        description = "Shooting star rejection at resistance: upper wick >= 2*body, seller dominance",
-                        hasContext = hasContext
+                if (hasContext || i == candles.lastIndex) {
+                    matches.add(
+                        PatternMatchResult(
+                            patternId = id,
+                            patternName = name,
+                            candleIndex = i,
+                            x = c.centerX,
+                            y = c.highY,
+                            direction = "DOWN",
+                            confidence = if (hasContext) 0.85f else 0.50f,
+                            weight = weight,
+                            quality = if (c.upperWick >= 3f * c.body) 1.0f else 0.8f,
+                            hasContext = hasContext,
+                            description = "Bearish Shooting Star: High rejection wick" +
+                                    if (hasContext) " (Aligned: Uptrend + Resistance Zone)" else " (Ignored: Missing context)"
+                        )
                     )
-                )
+                }
             }
         }
         return matches
@@ -129,12 +135,11 @@ class ShootingStarDetector : PatternDetector {
 }
 
 /**
- * 3. Bullish Engulfing
+ * 3. Bullish Engulfing (UP)
  * detect: prev is down candle AND current is up candle AND current body fully covers prev body AND current body >= 1.2*prev body
  * context_required: near support OR trend = DOWN exhausted
- * weight_with_context: 0.12, weight_without_context: 0.03
  */
-class BullishEngulfingDetector : PatternDetector {
+class KnowledgePackBullEngulfingDetector : KnowledgePackPatternDetector {
     override val id: String = "bull_engulfing"
     override val name: String = "Bullish Engulfing"
 
@@ -142,9 +147,8 @@ class BullishEngulfingDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
         if (candles.size < 2) return matches
@@ -153,32 +157,31 @@ class BullishEngulfingDetector : PatternDetector {
             val prev = candles[i - 1]
             val curr = candles[i]
 
-            // In screen Y: down candle has closeY > openY; up candle has closeY < openY
-            val prevIsDown = !prev.isBullish
-            val currIsUp = curr.isBullish
+            // In screen coordinates: smaller Y = higher price
+            val isPrevDown = !prev.isBullish
+            val isCurrUp = curr.isBullish
+            val coversBody = curr.bodyTop <= prev.bodyTop && curr.bodyBottom >= prev.bodyBottom
+            val isLarger = curr.body >= (1.2f * prev.body)
 
-            val coversPrev = curr.bodyBottom >= prev.bodyBottom && curr.bodyTop <= prev.bodyTop
-            val sizeFactor = curr.body >= (1.2f * prev.body)
-
-            if (prevIsDown && currIsUp && coversPrev && sizeFactor) {
-                val nearThreshold = if (atr > 0) 0.5f * atr else 20f
-                val nearSupport = srZones.any { it.isSupport && abs(it.yLevel - curr.lowY) <= nearThreshold }
+            if (isPrevDown && isCurrUp && coversBody && isLarger) {
+                val nearSupport = isNearZone(curr.bodyBottom, srZones, atr, isSupport = true)
                 val hasContext = nearSupport || trend == TrendDirection.DOWNTREND
-
                 val weight = if (hasContext) 0.12f else 0.03f
-                val confidence = if (hasContext) 0.78f else 0.65f
 
                 matches.add(
                     PatternMatchResult(
-                        patternName = "BULLISH_ENGULFING",
+                        patternId = id,
+                        patternName = name,
                         candleIndex = i,
                         x = curr.centerX,
-                        y = curr.lowY,
+                        y = curr.bodyBottom,
                         direction = "UP",
-                        confidence = confidence,
+                        confidence = if (hasContext) 0.88f else 0.65f,
                         weight = weight,
-                        description = "Bullish Engulfing: Strong green envelope completely covering previous red body",
-                        hasContext = hasContext
+                        quality = if (curr.body >= 1.5f * prev.body) 1.0f else 0.85f,
+                        hasContext = hasContext,
+                        description = "Bullish Engulfing: Current green candle completely engulfs prior red body" +
+                                if (hasContext) " (With Support / Downtrend context)" else ""
                     )
                 )
             }
@@ -188,12 +191,11 @@ class BullishEngulfingDetector : PatternDetector {
 }
 
 /**
- * 4. Bearish Engulfing
+ * 4. Bearish Engulfing (DOWN)
  * detect: prev is up candle AND current is down candle AND current body fully covers prev body AND current body >= 1.2*prev body
  * context_required: near resistance OR trend = UP exhausted
- * weight_with_context: 0.12, weight_without_context: 0.03
  */
-class BearishEngulfingDetector : PatternDetector {
+class KnowledgePackBearEngulfingDetector : KnowledgePackPatternDetector {
     override val id: String = "bear_engulfing"
     override val name: String = "Bearish Engulfing"
 
@@ -201,9 +203,8 @@ class BearishEngulfingDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
         if (candles.size < 2) return matches
@@ -212,31 +213,30 @@ class BearishEngulfingDetector : PatternDetector {
             val prev = candles[i - 1]
             val curr = candles[i]
 
-            val prevIsUp = prev.isBullish
-            val currIsDown = !curr.isBullish
+            val isPrevUp = prev.isBullish
+            val isCurrDown = !curr.isBullish
+            val coversBody = curr.bodyTop <= prev.bodyTop && curr.bodyBottom >= prev.bodyBottom
+            val isLarger = curr.body >= (1.2f * prev.body)
 
-            val coversPrev = curr.bodyBottom >= prev.bodyBottom && curr.bodyTop <= prev.bodyTop
-            val sizeFactor = curr.body >= (1.2f * prev.body)
-
-            if (prevIsUp && currIsDown && coversPrev && sizeFactor) {
-                val nearThreshold = if (atr > 0) 0.5f * atr else 20f
-                val nearResistance = srZones.any { !it.isSupport && abs(it.yLevel - curr.highY) <= nearThreshold }
+            if (isPrevUp && isCurrDown && coversBody && isLarger) {
+                val nearResistance = isNearZone(curr.bodyTop, srZones, atr, isSupport = false)
                 val hasContext = nearResistance || trend == TrendDirection.UPTREND
-
                 val weight = if (hasContext) 0.12f else 0.03f
-                val confidence = if (hasContext) 0.78f else 0.65f
 
                 matches.add(
                     PatternMatchResult(
-                        patternName = "BEARISH_ENGULFING",
+                        patternId = id,
+                        patternName = name,
                         candleIndex = i,
                         x = curr.centerX,
-                        y = curr.highY,
+                        y = curr.bodyTop,
                         direction = "DOWN",
-                        confidence = confidence,
+                        confidence = if (hasContext) 0.88f else 0.65f,
                         weight = weight,
-                        description = "Bearish Engulfing: Dominant red envelope completely covering previous green body",
-                        hasContext = hasContext
+                        quality = if (curr.body >= 1.5f * prev.body) 1.0f else 0.85f,
+                        hasContext = hasContext,
+                        description = "Bearish Engulfing: Current red candle completely engulfs prior green body" +
+                                if (hasContext) " (With Resistance / Uptrend context)" else ""
                     )
                 )
             }
@@ -246,12 +246,11 @@ class BearishEngulfingDetector : PatternDetector {
 }
 
 /**
- * 5. Morning Star
+ * 5. Morning Star (UP)
  * detect: c1 big down body, c2 small body (body_ratio<=0.3) gapping or sitting low, c3 up candle closing above c1 midpoint
  * context_required: trend = DOWN AND near support
- * weight_with_context: 0.13, weight_without_context: 0.02
  */
-class MorningStarDetector : PatternDetector {
+class KnowledgePackMorningStarDetector : KnowledgePackPatternDetector {
     override val id: String = "morning_star"
     override val name: String = "Morning Star"
 
@@ -259,9 +258,8 @@ class MorningStarDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
         if (candles.size < 3) return matches
@@ -271,31 +269,29 @@ class MorningStarDetector : PatternDetector {
             val c2 = candles[i - 1]
             val c3 = candles[i]
 
-            val c1Down = !c1.isBullish && c1.bodyRatio >= 0.45f
-            val c2Small = c2.bodyRatio <= 0.35f
-            val c2Low = c2.lowY >= c1.bodyBottom - 5f // Sitting low/near bottom
+            val isC1Down = !c1.isBullish && c1.bodyRatio >= 0.40f
+            val isC2Small = c2.bodyRatio <= 0.30f && c2.bodyTop >= c1.bodyBottom - (0.2f * atr)
             val c1MidpointY = (c1.openY + c1.closeY) / 2f
-            val c3UpClosingAboveMid = c3.isBullish && c3.closeY < c1MidpointY
+            val isC3UpAboveMid = c3.isBullish && c3.closeY < c1MidpointY // smaller Y = higher price
 
-            if (c1Down && c2Small && c2Low && c3UpClosingAboveMid) {
-                val nearThreshold = if (atr > 0) 0.5f * atr else 25f
-                val nearSupport = srZones.any { it.isSupport && abs(it.yLevel - c2.lowY) <= nearThreshold }
-                val hasContext = (trend == TrendDirection.DOWNTREND) && nearSupport
-
+            if (isC1Down && isC2Small && isC3UpAboveMid) {
+                val nearSupport = isNearZone(c2.lowY, srZones, atr, isSupport = true)
+                val hasContext = trend == TrendDirection.DOWNTREND && nearSupport
                 val weight = if (hasContext) 0.13f else 0.02f
-                val confidence = if (hasContext) 0.78f else 0.62f
 
                 matches.add(
                     PatternMatchResult(
-                        patternName = "MORNING_STAR",
+                        patternId = id,
+                        patternName = name,
                         candleIndex = i,
                         x = c3.centerX,
-                        y = c3.lowY,
+                        y = c2.lowY,
                         direction = "UP",
-                        confidence = confidence,
+                        confidence = if (hasContext) 0.89f else 0.60f,
                         weight = weight,
-                        description = "Morning Star: 3-bar reversal sequence confirming bullish turnaround at support",
-                        hasContext = hasContext
+                        quality = 0.95f,
+                        hasContext = hasContext,
+                        description = "Morning Star: 3-bar bottom reversal confirming transition to buyers"
                     )
                 )
             }
@@ -305,12 +301,11 @@ class MorningStarDetector : PatternDetector {
 }
 
 /**
- * 6. Evening Star
+ * 6. Evening Star (DOWN)
  * detect: c1 big up body, c2 small body (body_ratio<=0.3) sitting high, c3 down candle closing below c1 midpoint
  * context_required: trend = UP AND near resistance
- * weight_with_context: 0.13, weight_without_context: 0.02
  */
-class EveningStarDetector : PatternDetector {
+class KnowledgePackEveningStarDetector : KnowledgePackPatternDetector {
     override val id: String = "evening_star"
     override val name: String = "Evening Star"
 
@@ -318,9 +313,8 @@ class EveningStarDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
         if (candles.size < 3) return matches
@@ -330,31 +324,29 @@ class EveningStarDetector : PatternDetector {
             val c2 = candles[i - 1]
             val c3 = candles[i]
 
-            val c1Up = c1.isBullish && c1.bodyRatio >= 0.45f
-            val c2Small = c2.bodyRatio <= 0.35f
-            val c2High = c2.highY <= c1.bodyTop + 5f // Sitting high
+            val isC1Up = c1.isBullish && c1.bodyRatio >= 0.40f
+            val isC2Small = c2.bodyRatio <= 0.30f && c2.bodyBottom <= c1.bodyTop + (0.2f * atr)
             val c1MidpointY = (c1.openY + c1.closeY) / 2f
-            val c3DownClosingBelowMid = !c3.isBullish && c3.closeY > c1MidpointY
+            val isC3DownBelowMid = !c3.isBullish && c3.closeY > c1MidpointY // larger Y = lower price
 
-            if (c1Up && c2Small && c2High && c3DownClosingBelowMid) {
-                val nearThreshold = if (atr > 0) 0.5f * atr else 25f
-                val nearResistance = srZones.any { !it.isSupport && abs(it.yLevel - c2.highY) <= nearThreshold }
-                val hasContext = (trend == TrendDirection.UPTREND) && nearResistance
-
+            if (isC1Up && isC2Small && isC3DownBelowMid) {
+                val nearResistance = isNearZone(c2.highY, srZones, atr, isSupport = false)
+                val hasContext = trend == TrendDirection.UPTREND && nearResistance
                 val weight = if (hasContext) 0.13f else 0.02f
-                val confidence = if (hasContext) 0.78f else 0.62f
 
                 matches.add(
                     PatternMatchResult(
-                        patternName = "EVENING_STAR",
+                        patternId = id,
+                        patternName = name,
                         candleIndex = i,
                         x = c3.centerX,
-                        y = c3.highY,
+                        y = c2.highY,
                         direction = "DOWN",
-                        confidence = confidence,
+                        confidence = if (hasContext) 0.89f else 0.60f,
                         weight = weight,
-                        description = "Evening Star: 3-bar bearish exhaustion pattern turning down at resistance",
-                        hasContext = hasContext
+                        quality = 0.95f,
+                        hasContext = hasContext,
+                        description = "Evening Star: 3-bar top reversal confirming transition to sellers"
                     )
                 )
             }
@@ -364,12 +356,11 @@ class EveningStarDetector : PatternDetector {
 }
 
 /**
- * 7. Bullish Pin Bar
+ * 7. Bullish Pin Bar (UP)
  * detect: lower_wick >= 0.66*range AND body in upper third
  * context_required: wick pierces support and closes back above it
- * weight_with_context: 0.12, weight_without_context: 0.0
  */
-class BullishPinBarDetector : PatternDetector {
+class KnowledgePackPinBarBullDetector : KnowledgePackPatternDetector {
     override val id: String = "pin_bar_bull"
     override val name: String = "Bullish Pin Bar"
 
@@ -377,36 +368,40 @@ class BullishPinBarDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
+        if (candles.isEmpty()) return matches
+
         for (i in candles.indices) {
-            val candle = candles[i]
-            val isPin = candle.isPinBarBull
+            val c = candles[i]
+            val lowerWickOk = c.lowerWick >= (0.66f * c.range)
+            val bodyInUpperThird = c.bodyBottom <= (c.highY + (c.range * 0.35f))
 
-            if (isPin) {
-                val piercesSupport = srZones.any { it.isSupport && candle.lowY > it.yLevel && candle.bodyBottom <= it.yLevel + 8f }
-                val nearSupport = srZones.any { it.isSupport && abs(it.yLevel - candle.lowY) <= (0.5f * atr) }
-                val hasContext = piercesSupport || nearSupport
+            if (lowerWickOk && bodyInUpperThird) {
+                // context_required: wick pierces support and closes back above it
+                val piercedSupport = srZones.filter { it.isSupport }
+                    .any { it.containsPrice(c.lowY) || (c.lowY >= it.yLevel && c.closeY <= it.yLevel) }
 
-                val weight = if (hasContext) 0.12f else 0.0f
-                val confidence = if (hasContext) 0.78f else 0.60f
-
-                matches.add(
-                    PatternMatchResult(
-                        patternName = "PIN_BAR_BULL",
-                        candleIndex = i,
-                        x = candle.centerX,
-                        y = candle.lowY,
-                        direction = "UP",
-                        confidence = confidence,
-                        weight = weight,
-                        description = "Bullish Pin Bar: Lower wick >= 66% range piercing support level",
-                        hasContext = hasContext
+                val weight = if (piercedSupport) 0.12f else 0.0f
+                if (piercedSupport || i == candles.lastIndex) {
+                    matches.add(
+                        PatternMatchResult(
+                            patternId = id,
+                            patternName = name,
+                            candleIndex = i,
+                            x = c.centerX,
+                            y = c.lowY,
+                            direction = "UP",
+                            confidence = if (piercedSupport) 0.88f else 0.50f,
+                            weight = weight,
+                            quality = 0.90f,
+                            hasContext = piercedSupport,
+                            description = "Bullish Pin Bar: 66%+ lower wick piercing support and closing above"
+                        )
                     )
-                )
+                }
             }
         }
         return matches
@@ -414,12 +409,11 @@ class BullishPinBarDetector : PatternDetector {
 }
 
 /**
- * 8. Bearish Pin Bar
+ * 8. Bearish Pin Bar (DOWN)
  * detect: upper_wick >= 0.66*range AND body in lower third
  * context_required: wick pierces resistance and closes back below it
- * weight_with_context: 0.12, weight_without_context: 0.0
  */
-class BearishPinBarDetector : PatternDetector {
+class KnowledgePackPinBarBearDetector : KnowledgePackPatternDetector {
     override val id: String = "pin_bar_bear"
     override val name: String = "Bearish Pin Bar"
 
@@ -427,36 +421,39 @@ class BearishPinBarDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
+        if (candles.isEmpty()) return matches
+
         for (i in candles.indices) {
-            val candle = candles[i]
-            val isPin = candle.isPinBarBear
+            val c = candles[i]
+            val upperWickOk = c.upperWick >= (0.66f * c.range)
+            val bodyInLowerThird = c.bodyTop >= (c.lowY - (c.range * 0.35f))
 
-            if (isPin) {
-                val piercesResistance = srZones.any { !it.isSupport && candle.highY < it.yLevel && candle.bodyTop >= it.yLevel - 8f }
-                val nearResistance = srZones.any { !it.isSupport && abs(it.yLevel - candle.highY) <= (0.5f * atr) }
-                val hasContext = piercesResistance || nearResistance
+            if (upperWickOk && bodyInLowerThird) {
+                val piercedResistance = srZones.filter { !it.isSupport }
+                    .any { it.containsPrice(c.highY) || (c.highY <= it.yLevel && c.closeY >= it.yLevel) }
 
-                val weight = if (hasContext) 0.12f else 0.0f
-                val confidence = if (hasContext) 0.78f else 0.60f
-
-                matches.add(
-                    PatternMatchResult(
-                        patternName = "PIN_BAR_BEAR",
-                        candleIndex = i,
-                        x = candle.centerX,
-                        y = candle.highY,
-                        direction = "DOWN",
-                        confidence = confidence,
-                        weight = weight,
-                        description = "Bearish Pin Bar: Upper wick >= 66% range rejecting resistance level",
-                        hasContext = hasContext
+                val weight = if (piercedResistance) 0.12f else 0.0f
+                if (piercedResistance || i == candles.lastIndex) {
+                    matches.add(
+                        PatternMatchResult(
+                            patternId = id,
+                            patternName = name,
+                            candleIndex = i,
+                            x = c.centerX,
+                            y = c.highY,
+                            direction = "DOWN",
+                            confidence = if (piercedResistance) 0.88f else 0.50f,
+                            weight = weight,
+                            quality = 0.90f,
+                            hasContext = piercedResistance,
+                            description = "Bearish Pin Bar: 66%+ upper wick piercing resistance and closing below"
+                        )
                     )
-                )
+                }
             }
         }
         return matches
@@ -464,12 +461,11 @@ class BearishPinBarDetector : PatternDetector {
 }
 
 /**
- * 9. Tweezer Bottom
+ * 9. Tweezer Bottom (UP)
  * detect: two candles with lows within 0.05*ATR, first down second up
  * context_required: near support
- * weight_with_context: 0.08, weight_without_context: 0.0
  */
-class TweezerBottomDetector : PatternDetector {
+class KnowledgePackTweezerBottomDetector : KnowledgePackPatternDetector {
     override val id: String = "tweezer_bottom"
     override val name: String = "Tweezer Bottom"
 
@@ -477,37 +473,36 @@ class TweezerBottomDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
         if (candles.size < 2) return matches
 
-        val threshold = maxOf(2f, 0.05f * atr)
         for (i in 1 until candles.size) {
             val c1 = candles[i - 1]
             val c2 = candles[i]
 
-            val sameLows = abs(c1.lowY - c2.lowY) <= threshold
-            val firstDownSecondUp = !c1.isBullish && c2.isBullish
+            val sameLows = abs(c1.lowY - c2.lowY) <= (0.05f * atr).coerceAtLeast(3f)
+            val correctColors = !c1.isBullish && c2.isBullish
 
-            if (sameLows && firstDownSecondUp) {
-                val nearSupport = srZones.any { it.isSupport && abs(it.yLevel - c2.lowY) <= (0.5f * atr) }
+            if (sameLows && correctColors) {
+                val nearSupport = isNearZone(c2.lowY, srZones, atr, isSupport = true)
                 val weight = if (nearSupport) 0.08f else 0.0f
-                val confidence = if (nearSupport) 0.74f else 0.58f
 
                 matches.add(
                     PatternMatchResult(
-                        patternName = "TWEEZER_BOTTOM",
+                        patternId = id,
+                        patternName = name,
                         candleIndex = i,
                         x = c2.centerX,
                         y = c2.lowY,
                         direction = "UP",
-                        confidence = confidence,
+                        confidence = if (nearSupport) 0.82f else 0.50f,
                         weight = weight,
-                        description = "Tweezer Bottom: Matched lows confirming floor rejection at support",
-                        hasContext = nearSupport
+                        quality = 0.85f,
+                        hasContext = nearSupport,
+                        description = "Tweezer Bottom: Matching lows within 0.05*ATR rejected at Support"
                     )
                 )
             }
@@ -517,12 +512,11 @@ class TweezerBottomDetector : PatternDetector {
 }
 
 /**
- * 10. Tweezer Top
+ * 10. Tweezer Top (DOWN)
  * detect: two candles with highs within 0.05*ATR, first up second down
  * context_required: near resistance
- * weight_with_context: 0.08, weight_without_context: 0.0
  */
-class TweezerTopDetector : PatternDetector {
+class KnowledgePackTweezerTopDetector : KnowledgePackPatternDetector {
     override val id: String = "tweezer_top"
     override val name: String = "Tweezer Top"
 
@@ -530,37 +524,36 @@ class TweezerTopDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
         if (candles.size < 2) return matches
 
-        val threshold = maxOf(2f, 0.05f * atr)
         for (i in 1 until candles.size) {
             val c1 = candles[i - 1]
             val c2 = candles[i]
 
-            val sameHighs = abs(c1.highY - c2.highY) <= threshold
-            val firstUpSecondDown = c1.isBullish && !c2.isBullish
+            val sameHighs = abs(c1.highY - c2.highY) <= (0.05f * atr).coerceAtLeast(3f)
+            val correctColors = c1.isBullish && !c2.isBullish
 
-            if (sameHighs && firstUpSecondDown) {
-                val nearResistance = srZones.any { !it.isSupport && abs(it.yLevel - c2.highY) <= (0.5f * atr) }
+            if (sameHighs && correctColors) {
+                val nearResistance = isNearZone(c2.highY, srZones, atr, isSupport = false)
                 val weight = if (nearResistance) 0.08f else 0.0f
-                val confidence = if (nearResistance) 0.74f else 0.58f
 
                 matches.add(
                     PatternMatchResult(
-                        patternName = "TWEEZER_TOP",
+                        patternId = id,
+                        patternName = name,
                         candleIndex = i,
                         x = c2.centerX,
                         y = c2.highY,
                         direction = "DOWN",
-                        confidence = confidence,
+                        confidence = if (nearResistance) 0.82f else 0.50f,
                         weight = weight,
-                        description = "Tweezer Top: Matched highs rejecting resistance ceiling twice",
-                        hasContext = nearResistance
+                        quality = 0.85f,
+                        hasContext = nearResistance,
+                        description = "Tweezer Top: Matching highs within 0.05*ATR rejected at Resistance"
                     )
                 )
             }
@@ -570,12 +563,12 @@ class TweezerTopDetector : PatternDetector {
 }
 
 /**
- * 11. Inside Bar
- * detect: current high < prev high AND current low > prev low
+ * 11. Inside Bar (BREAKOUT)
+ * detect: current high < prev high AND current low > prev low (in price space)
+ * Screen Y: curr.highY > prev.highY AND curr.lowY < prev.lowY
  * context_required: trade only the break of mother bar in direction of higher timeframe trend
- * weight_with_context: 0.07, weight_without_context: 0.0
  */
-class InsideBarDetector : PatternDetector {
+class KnowledgePackInsideBarDetector : KnowledgePackPatternDetector {
     override val id: String = "inside_bar"
     override val name: String = "Inside Bar"
 
@@ -583,37 +576,42 @@ class InsideBarDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
         if (candles.size < 2) return matches
 
         for (i in 1 until candles.size) {
             val mother = candles[i - 1]
-            val curr = candles[i]
+            val inside = candles[i]
 
             // In screen coordinates: smaller Y = higher price
-            val insideHigh = curr.highY > mother.highY
-            val insideLow = curr.lowY < mother.lowY
+            val isInsideHigh = inside.highY > mother.highY
+            val isInsideLow = inside.lowY < mother.lowY
 
-            if (insideHigh && insideLow) {
-                val dir = if (higherTfTrend == "UP" || trend == TrendDirection.UPTREND) "UP"
-                else if (higherTfTrend == "DOWN" || trend == TrendDirection.DOWNTREND) "DOWN"
-                else "BREAKOUT"
+            if (isInsideHigh && isInsideLow) {
+                val dir = when (trend) {
+                    TrendDirection.UPTREND -> "UP"
+                    TrendDirection.DOWNTREND -> "DOWN"
+                    TrendDirection.SIDEWAYS -> "NEUTRAL"
+                }
+                val hasContext = trend != TrendDirection.SIDEWAYS
+                val weight = if (hasContext) 0.07f else 0.0f
 
                 matches.add(
                     PatternMatchResult(
-                        patternName = "INSIDE_BAR",
+                        patternId = id,
+                        patternName = name,
                         candleIndex = i,
-                        x = curr.centerX,
-                        y = (curr.highY + curr.lowY) / 2f,
+                        x = inside.centerX,
+                        y = inside.bodyTop,
                         direction = dir,
-                        confidence = 0.72f,
-                        weight = 0.07f,
-                        description = "Inside Bar: Volatility contraction awaiting breakout in trend direction",
-                        hasContext = true
+                        confidence = if (hasContext) 0.75f else 0.55f,
+                        weight = weight,
+                        quality = 0.80f,
+                        hasContext = hasContext,
+                        description = "Inside Bar: Volatility contraction inside mother bar; trade trend breakout"
                     )
                 )
             }
@@ -623,11 +621,11 @@ class InsideBarDetector : PatternDetector {
 }
 
 /**
- * 12. Doji
+ * 12. Doji (NEUTRAL)
  * detect: body_ratio <= 0.1
  * effect: Reduces confidence of continuation by 0.05; adds 0.03 to reversal signals at S/R. Never a signal alone.
  */
-class DojiDetector : PatternDetector {
+class KnowledgePackDojiDetector : KnowledgePackPatternDetector {
     override val id: String = "doji"
     override val name: String = "Doji"
 
@@ -635,26 +633,31 @@ class DojiDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
+        if (candles.isEmpty()) return matches
+
         for (i in candles.indices) {
-            val candle = candles[i]
-            if (candle.isDoji) {
-                val nearSR = srZones.any { abs(it.yLevel - candle.centerX) <= (0.5f * atr) }
+            val c = candles[i]
+            if (c.bodyRatio <= 0.10f && c.range >= 5f) {
+                val nearSr = isNearZone(c.closeY, srZones, atr, isSupport = true) ||
+                        isNearZone(c.closeY, srZones, atr, isSupport = false)
+
                 matches.add(
                     PatternMatchResult(
-                        patternName = "DOJI",
+                        patternId = id,
+                        patternName = name,
                         candleIndex = i,
-                        x = candle.centerX,
-                        y = (candle.highY + candle.lowY) / 2f,
+                        x = c.centerX,
+                        y = c.bodyTop,
                         direction = "NEUTRAL",
                         confidence = 0.50f,
-                        weight = 0.03f,
-                        description = "Doji Indecision: Body <= 10% range. Reversal warning at S/R levels.",
-                        hasContext = nearSR
+                        weight = if (nearSr) 0.03f else -0.05f,
+                        quality = 0.70f,
+                        hasContext = nearSr,
+                        description = "Doji: Indecision bar (body <= 10% range). Modifies reversal / continuation confluence."
                     )
                 )
             }
@@ -664,12 +667,11 @@ class DojiDetector : PatternDetector {
 }
 
 /**
- * 13. Marubozu (momentum)
+ * 13. Marubozu (WITH_CANDLE)
  * detect: body_ratio >= 0.85
  * context_required: closes beyond a level (breakout) OR trend continuation
- * weight_with_context: 0.08, weight_without_context: 0.0
  */
-class MarubozuDetector : PatternDetector {
+class KnowledgePackMarubozuDetector : KnowledgePackPatternDetector {
     override val id: String = "marubozu"
     override val name: String = "Marubozu"
 
@@ -677,26 +679,33 @@ class MarubozuDetector : PatternDetector {
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
+        if (candles.isEmpty()) return matches
+
         for (i in candles.indices) {
-            val candle = candles[i]
-            if (candle.isMarubozu) {
-                val dir = if (candle.isBullish) "UP" else "DOWN"
+            val c = candles[i]
+            if (c.bodyRatio >= 0.85f && c.range >= (0.6f * atr)) {
+                val dir = if (c.isBullish) "UP" else "DOWN"
+                val alignedTrend = (dir == "UP" && trend == TrendDirection.UPTREND) ||
+                        (dir == "DOWN" && trend == TrendDirection.DOWNTREND)
+
+                val weight = if (alignedTrend) 0.08f else 0.0f
                 matches.add(
                     PatternMatchResult(
-                        patternName = "MARUBOZU",
+                        patternId = id,
+                        patternName = "Marubozu (Momentum)",
                         candleIndex = i,
-                        x = candle.centerX,
-                        y = if (candle.isBullish) candle.lowY else candle.highY,
+                        x = c.centerX,
+                        y = if (c.isBullish) c.closeY else c.openY,
                         direction = dir,
-                        confidence = 0.74f,
-                        weight = 0.08f,
-                        description = "Marubozu: Dominant momentum body >= 85% range without rejection wicks",
-                        hasContext = true
+                        confidence = if (alignedTrend) 0.84f else 0.60f,
+                        weight = weight,
+                        quality = 0.90f,
+                        hasContext = alignedTrend,
+                        description = "Marubozu: Dominant momentum body (>= 85% range) driving trend"
                     )
                 )
             }
@@ -706,22 +715,20 @@ class MarubozuDetector : PatternDetector {
 }
 
 /**
- * 14. Three White Soldiers / Three Black Crows
+ * 14. Three Soldiers / Three Crows (WITH_CANDLES)
  * detect: 3 consecutive same-color candles, each opening within previous body and closing near its high/low
  * context_required: not already extended more than 3*ATR
- * weight_with_context: 0.08, weight_without_context: 0.02
  */
-class ThreeSoldiersDetector : PatternDetector {
+class KnowledgePackThreeSoldiersDetector : KnowledgePackPatternDetector {
     override val id: String = "three_soldiers"
-    override val name: String = "Three Soldiers / Crows"
+    override val name: String = "Three Soldiers/Crows"
 
     override fun detect(
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float,
         trend: TrendDirection,
-        higherTfTrend: String
+        atr: Float
     ): List<PatternMatchResult> {
         val matches = mutableListOf<PatternMatchResult>()
         if (candles.size < 3) return matches
@@ -731,45 +738,63 @@ class ThreeSoldiersDetector : PatternDetector {
             val c2 = candles[i - 1]
             val c3 = candles[i]
 
-            val allBull = c1.isBullish && c2.isBullish && c3.isBullish
-            val allBear = !c1.isBullish && !c2.isBullish && !c3.isBullish
+            val allBullish = c1.isBullish && c2.isBullish && c3.isBullish
+            val allBearish = !c1.isBullish && !c2.isBullish && !c3.isBullish
 
-            if (allBull) {
-                val totalMove = c1.lowY - c3.highY
-                val notExtended = atr <= 0f || totalMove <= (3f * atr)
-                val weight = if (notExtended) 0.08f else 0.02f
+            if (allBullish) {
+                val opensWithinBody = c2.openY in c1.closeY..c1.openY && c3.openY in c2.closeY..c2.openY
+                val closesNearHigh = c1.upperWick <= 0.2f * c1.range &&
+                        c2.upperWick <= 0.2f * c2.range &&
+                        c3.upperWick <= 0.2f * c3.range
 
-                matches.add(
-                    PatternMatchResult(
-                        patternName = "THREE_SOLDIERS",
-                        candleIndex = i,
-                        x = c3.centerX,
-                        y = c3.lowY,
-                        direction = "UP",
-                        confidence = 0.76f,
-                        weight = weight,
-                        description = "Three White Soldiers: Consecutive advancing green bars showing persistent buying pressure",
-                        hasContext = notExtended
+                if (opensWithinBody && closesNearHigh) {
+                    val totalExtension = abs(c3.closeY - c1.openY)
+                    val notExtended = totalExtension <= (3f * atr)
+                    val weight = if (notExtended) 0.08f else 0.02f
+
+                    matches.add(
+                        PatternMatchResult(
+                            patternId = id,
+                            patternName = "Three White Soldiers",
+                            candleIndex = i,
+                            x = c3.centerX,
+                            y = c3.closeY,
+                            direction = "UP",
+                            confidence = if (notExtended) 0.86f else 0.65f,
+                            weight = weight,
+                            quality = 0.90f,
+                            hasContext = notExtended,
+                            description = "Three White Soldiers: Consecutive advancing green candles"
+                        )
                     )
-                )
-            } else if (allBear) {
-                val totalMove = c3.lowY - c1.highY
-                val notExtended = atr <= 0f || totalMove <= (3f * atr)
-                val weight = if (notExtended) 0.08f else 0.02f
+                }
+            } else if (allBearish) {
+                val opensWithinBody = c2.openY in c1.openY..c1.closeY && c3.openY in c2.openY..c2.closeY
+                val closesNearLow = c1.lowerWick <= 0.2f * c1.range &&
+                        c2.lowerWick <= 0.2f * c2.range &&
+                        c3.lowerWick <= 0.2f * c3.range
 
-                matches.add(
-                    PatternMatchResult(
-                        patternName = "THREE_CROWS",
-                        candleIndex = i,
-                        x = c3.centerX,
-                        y = c3.highY,
-                        direction = "DOWN",
-                        confidence = 0.76f,
-                        weight = weight,
-                        description = "Three Black Crows: Consecutive plunging red bars showing persistent selling pressure",
-                        hasContext = notExtended
+                if (opensWithinBody && closesNearLow) {
+                    val totalExtension = abs(c3.closeY - c1.openY)
+                    val notExtended = totalExtension <= (3f * atr)
+                    val weight = if (notExtended) 0.08f else 0.02f
+
+                    matches.add(
+                        PatternMatchResult(
+                            patternId = id,
+                            patternName = "Three Black Crows",
+                            candleIndex = i,
+                            x = c3.centerX,
+                            y = c3.closeY,
+                            direction = "DOWN",
+                            confidence = if (notExtended) 0.86f else 0.65f,
+                            weight = weight,
+                            quality = 0.90f,
+                            hasContext = notExtended,
+                            description = "Three Black Crows: Consecutive falling red candles"
+                        )
                     )
-                )
+                }
             }
         }
         return matches
@@ -777,39 +802,33 @@ class ThreeSoldiersDetector : PatternDetector {
 }
 
 /**
- * Composite manager orchestrating all modular candlestick detectors.
+ * Composite engine organizing all 14 Knowledge Pack pattern detectors.
  */
-object CompositePatternEngine {
-
-    private val allDetectors: List<PatternDetector> = listOf(
-        HammerDetector(),
-        ShootingStarDetector(),
-        BullishEngulfingDetector(),
-        BearishEngulfingDetector(),
-        MorningStarDetector(),
-        EveningStarDetector(),
-        BullishPinBarDetector(),
-        BearishPinBarDetector(),
-        TweezerBottomDetector(),
-        TweezerTopDetector(),
-        InsideBarDetector(),
-        DojiDetector(),
-        MarubozuDetector(),
-        ThreeSoldiersDetector()
+object KnowledgePackPatternEngine {
+    val detectors: List<KnowledgePackPatternDetector> = listOf(
+        KnowledgePackHammerDetector(),
+        KnowledgePackShootingStarDetector(),
+        KnowledgePackBullEngulfingDetector(),
+        KnowledgePackBearEngulfingDetector(),
+        KnowledgePackMorningStarDetector(),
+        KnowledgePackEveningStarDetector(),
+        KnowledgePackPinBarBullDetector(),
+        KnowledgePackPinBarBearDetector(),
+        KnowledgePackTweezerBottomDetector(),
+        KnowledgePackTweezerTopDetector(),
+        KnowledgePackInsideBarDetector(),
+        KnowledgePackDojiDetector(),
+        KnowledgePackMarubozuDetector(),
+        KnowledgePackThreeSoldiersDetector()
     )
 
     fun detectAll(
         candles: List<Candle>,
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
-        atr: Float = 15f,
-        trend: TrendDirection = TrendDirection.SIDEWAYS,
-        higherTfTrend: String = "ANY"
+        trend: TrendDirection,
+        atr: Float
     ): List<PatternMatchResult> {
-        val results = mutableListOf<PatternMatchResult>()
-        for (detector in allDetectors) {
-            results.addAll(detector.detect(candles, swings, srZones, atr, trend, higherTfTrend))
-        }
-        return results
+        return detectors.flatMap { it.detect(candles, swings, srZones, trend, atr) }
     }
 }

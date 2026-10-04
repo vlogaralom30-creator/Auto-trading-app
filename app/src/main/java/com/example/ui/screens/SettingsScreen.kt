@@ -20,21 +20,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
@@ -44,8 +41,6 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableDoubleStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -57,11 +52,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.AccountMode
-import com.example.model.AutoTraderSelectors
 import com.example.model.ColorCalibration
-import com.example.model.RiskConfig
-import com.example.model.SiteTimeframeProfile
 import com.example.ui.theme.BackgroundDark
 import com.example.ui.theme.BackgroundElevated
 import com.example.ui.theme.BorderDark
@@ -69,7 +60,6 @@ import com.example.ui.theme.NeonBlue
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonGreen
 import com.example.ui.theme.NeonRed
-import com.example.ui.theme.NeonYellow
 import com.example.ui.theme.SurfaceCard
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
@@ -78,39 +68,25 @@ import com.example.ui.theme.TextSecondary
 @Composable
 fun SettingsScreen(
     calibration: ColorCalibration,
-    profile: SiteTimeframeProfile,
-    riskConfig: RiskConfig = RiskConfig(),
-    selectors: AutoTraderSelectors = AutoTraderSelectors(),
-    accountMode: AccountMode = AccountMode.DEMO,
     soundEnabled: Boolean,
     hapticEnabled: Boolean,
+    dailyLimit: Int,
+    isNewsWindowActive: Boolean,
+    currentSite: String,
+    timeframeSelector: String,
+    zoomMethod: String,
     onCalibrationChanged: (ColorCalibration) -> Unit,
-    onProfileChanged: (SiteTimeframeProfile) -> Unit,
-    onRiskConfigChanged: (RiskConfig) -> Unit = {},
-    onSelectorsChanged: (AutoTraderSelectors) -> Unit = {},
-    onAccountModeChanged: (AccountMode) -> Unit = {},
     onSoundToggled: (Boolean) -> Unit,
     onHapticToggled: (Boolean) -> Unit,
-    onDailyLimitChanged: (Int) -> Unit = {},
+    onDailyLimitChanged: (Int) -> Unit,
+    onNewsWindowToggled: (Boolean) -> Unit,
+    onSiteProfileChanged: (site: String, selector: String, zoom: String) -> Unit,
     onResetPresets: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var showRealConfirmDialog by remember { mutableStateOf(false) }
-
-    var fixedStake by remember(riskConfig.fixedStake) { mutableDoubleStateOf(riskConfig.fixedStake) }
-    var dailyLossLimit by remember(riskConfig.dailyLossLimit) { mutableDoubleStateOf(riskConfig.dailyLossLimit) }
-    var dailyProfitTarget by remember(riskConfig.dailyProfitTarget) { mutableDoubleStateOf(riskConfig.dailyProfitTarget) }
-    var maxTradesPerDay by remember(riskConfig.maxTradesPerDay) { mutableIntStateOf(riskConfig.maxTradesPerDay) }
-
-    var stakeInputSel by remember(selectors.stakeInputSelector) { mutableStateOf(selectors.stakeInputSelector) }
-    var upBtnSel by remember(selectors.upButtonSelector) { mutableStateOf(selectors.upButtonSelector) }
-    var downBtnSel by remember(selectors.downButtonSelector) { mutableStateOf(selectors.downButtonSelector) }
-    var balanceSel by remember(selectors.balanceSelector) { mutableStateOf(selectors.balanceSelector) }
-    var resultSel by remember(selectors.resultSelector) { mutableStateOf(selectors.resultSelector) }
-
-    var sel1m by remember(profile.timeframe1mSelector) { mutableStateOf(profile.timeframe1mSelector) }
-    var sel5m by remember(profile.timeframe5mSelector) { mutableStateOf(profile.timeframe5mSelector) }
-    var sel15m by remember(profile.timeframe15mSelector) { mutableStateOf(profile.timeframe15mSelector) }
+    var activeSite by remember(currentSite) { mutableStateOf(currentSite) }
+    var selectorText by remember(timeframeSelector) { mutableStateOf(timeframeSelector) }
+    var activeZoomMethod by remember(zoomMethod) { mutableStateOf(zoomMethod) }
 
     Column(
         modifier = modifier
@@ -121,81 +97,20 @@ fun SettingsScreen(
             .testTag("settings_screen")
     ) {
         Text(
-            text = "SETTINGS & RISK CONTROLS",
+            text = "SETTINGS & SITE PROFILES",
             style = MaterialTheme.typography.titleLarge,
             color = NeonBlue,
             fontWeight = FontWeight.Bold
         )
         Text(
-            text = "Account mode, risk boundaries, DOM selectors & calibration",
+            text = "Configure multi-timeframe DOM selectors, broker calibration & risk filters",
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 1. Account Mode (DEMO vs REAL)
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, if (accountMode == AccountMode.REAL) NeonRed else BorderDark, RoundedCornerShape(12.dp)),
-            colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = "Account Mode",
-                            tint = if (accountMode == AccountMode.REAL) NeonRed else NeonGreen,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "EXECUTION ACCOUNT MODE",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = TextPrimary
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(BackgroundElevated)
-                            .padding(2.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(if (accountMode == AccountMode.DEMO) NeonGreen.copy(0.2f) else Color.Transparent)
-                                .clickable { onAccountModeChanged(AccountMode.DEMO) }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text("DEMO", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (accountMode == AccountMode.DEMO) NeonGreen else TextMuted)
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(if (accountMode == AccountMode.REAL) NeonRed.copy(0.25f) else Color.Transparent)
-                                .clickable { showRealConfirmDialog = true }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text("REAL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (accountMode == AccountMode.REAL) NeonRed else TextMuted)
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // 2. Risk Manager Constraints
+        // 1. Multi-Timeframe Site Profiles & Editable DOM Selectors
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -205,273 +120,232 @@ fun SettingsScreen(
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Security, contentDescription = "Risk", tint = NeonYellow, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.Code, contentDescription = "Site Profiles", tint = NeonCyan)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("RISK GOVERNANCE (ANTI-MARTINGALE)", style = MaterialTheme.typography.titleSmall, color = NeonYellow)
+                    Text(
+                        text = "MULTI-TIMEFRAME SITE PROFILES",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Text(
+                    text = "Selectors differ per site. Verify in DevTools and configure below (never hardcoded).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Site selection chips
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("TradingView", "Quotex", "Exness").forEach { site ->
+                        val isSelected = activeSite.equals(site, ignoreCase = true)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) NeonCyan.copy(alpha = 0.2f) else BackgroundElevated)
+                                .border(1.dp, if (isSelected) NeonCyan else BorderDark, RoundedCornerShape(8.dp))
+                                .clickable {
+                                    activeSite = site
+                                    val (defaultSel, defaultZoom) = when (site.lowercase()) {
+                                        "quotex" -> Pair("div[data-value='{tf}'], button[data-time='{tf}']", "pinch_gesture")
+                                        "exness" -> Pair("button[data-period='{tf}'], div[data-value='{tf}']", "wheel_event_on_chart_canvas")
+                                        else -> Pair("button[data-value='{tf}'], div[data-value='{tf}'], [aria-label*='{tf}']", "wheel_event_on_chart_canvas")
+                                    }
+                                    selectorText = defaultSel
+                                    activeZoomMethod = defaultZoom
+                                    onSiteProfileChanged(site, defaultSel, defaultZoom)
+                                }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = site,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) NeonCyan else TextPrimary
+                            )
+                        }
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Fixed Stake
+                Text(
+                    text = "Timeframe CSS Selector ({tf} is replaced with 15m, 5m, 1m):",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = selectorText,
+                    onValueChange = {
+                        selectorText = it
+                        onSiteProfileChanged(activeSite, it, activeZoomMethod)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("timeframe_selector_input"),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NeonCyan,
+                        unfocusedBorderColor = BorderDark,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        cursorColor = NeonCyan
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    singleLine = false,
+                    maxLines = 3
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Chart Fit Zoom Method:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val isWheel = activeZoomMethod == "wheel_event_on_chart_canvas"
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isWheel) NeonBlue.copy(alpha = 0.2f) else BackgroundElevated)
+                            .border(1.dp, if (isWheel) NeonBlue else BorderDark, RoundedCornerShape(8.dp))
+                        .clickable {
+                            activeZoomMethod = "wheel_event_on_chart_canvas"
+                            onSiteProfileChanged(activeSite, selectorText, activeZoomMethod)
+                        }
+                        .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Wheel Event Canvas",
+                            fontSize = 11.sp,
+                            color = if (isWheel) NeonBlue else TextPrimary
+                        )
+                    }
+
+                    val isPinch = activeZoomMethod == "pinch_gesture"
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isPinch) NeonBlue.copy(alpha = 0.2f) else BackgroundElevated)
+                            .border(1.dp, if (isPinch) NeonBlue else BorderDark, RoundedCornerShape(8.dp))
+                            .clickable {
+                                activeZoomMethod = "pinch_gesture"
+                                onSiteProfileChanged(activeSite, selectorText, activeZoomMethod)
+                            }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Pinch Touch Gesture",
+                            fontSize = 11.sp,
+                            color = if (isPinch) NeonBlue else TextPrimary
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 2. Risk Limits & No-Trade Filters
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, BorderDark, RoundedCornerShape(12.dp)),
+            colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Shield, contentDescription = "Risk Guard", tint = NeonGreen)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "RISK CONTROLS & NO-TRADE FILTERS",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Economic News release window toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text("Fixed Stake per Trade", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-                        Text("Never increased after a loss (No Martingale)", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Newspaper, contentDescription = "News", tint = NeonRed, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("High-Impact News Window", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                            Text("Blocks signals during major economic releases", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                        }
                     }
-                    Text("$$fixedStake", style = MaterialTheme.typography.titleMedium, color = NeonGreen, fontWeight = FontWeight.Bold)
+                    Switch(
+                        checked = isNewsWindowActive,
+                        onCheckedChange = onNewsWindowToggled,
+                        colors = SwitchDefaults.colors(checkedThumbColor = NeonRed, checkedTrackColor = NeonRed.copy(alpha = 0.5f))
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Daily Limit
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Daily Signal Limit:", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                    Text("$dailyLimit signals", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = NeonGreen)
                 }
                 Slider(
-                    value = fixedStake.toFloat(),
-                    onValueChange = {
-                        fixedStake = Math.round(it * 10.0) / 10.0
-                        onRiskConfigChanged(riskConfig.copy(fixedStake = fixedStake))
-                    },
-                    valueRange = 0.5f..10.0f,
-                    steps = 19,
+                    value = dailyLimit.toFloat(),
+                    onValueChange = { onDailyLimitChanged(it.toInt()) },
+                    valueRange = 5f..30f,
+                    steps = 24,
                     colors = SliderDefaults.colors(thumbColor = NeonGreen, activeTrackColor = NeonGreen)
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Daily Loss Limit
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Daily Loss Limit", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-                        Text("Locks trading immediately when reached", style = MaterialTheme.typography.bodySmall, color = TextMuted)
-                    }
-                    Text("$$dailyLossLimit", style = MaterialTheme.typography.titleMedium, color = NeonRed, fontWeight = FontWeight.Bold)
-                }
-                Slider(
-                    value = dailyLossLimit.toFloat(),
-                    onValueChange = {
-                        dailyLossLimit = Math.round(it * 10.0) / 10.0
-                        onRiskConfigChanged(riskConfig.copy(dailyLossLimit = dailyLossLimit))
-                    },
-                    valueRange = 1.0f..20.0f,
-                    colors = SliderDefaults.colors(thumbColor = NeonRed, activeTrackColor = NeonRed)
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Daily Profit Target
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Daily Profit Target", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-                        Text("Locks trading to secure profits", style = MaterialTheme.typography.bodySmall, color = TextMuted)
-                    }
-                    Text("$$dailyProfitTarget", style = MaterialTheme.typography.titleMedium, color = NeonCyan, fontWeight = FontWeight.Bold)
-                }
-                Slider(
-                    value = dailyProfitTarget.toFloat(),
-                    onValueChange = {
-                        dailyProfitTarget = Math.round(it * 10.0) / 10.0
-                        onRiskConfigChanged(riskConfig.copy(dailyProfitTarget = dailyProfitTarget))
-                    },
-                    valueRange = 1.0f..20.0f,
-                    colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Max Trades Per Day
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Max Trades Per Day", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-                        Text("Enforces trading discipline", style = MaterialTheme.typography.bodySmall, color = TextMuted)
-                    }
-                    Text("$maxTradesPerDay", style = MaterialTheme.typography.titleMedium, color = NeonBlue, fontWeight = FontWeight.Bold)
-                }
-                Slider(
-                    value = maxTradesPerDay.toFloat(),
-                    onValueChange = {
-                        maxTradesPerDay = it.toInt()
-                        onRiskConfigChanged(riskConfig.copy(maxTradesPerDay = maxTradesPerDay))
-                        onDailyLimitChanged(maxTradesPerDay)
-                    },
-                    valueRange = 2f..20f,
-                    steps = 17,
-                    colors = SliderDefaults.colors(thumbColor = NeonBlue, activeTrackColor = NeonBlue)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // 3. AutoTrader Platform DOM Selectors
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, BorderDark, RoundedCornerShape(12.dp)),
-            colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text("AUTOTRADER DOM SELECTORS", style = MaterialTheme.typography.titleSmall, color = NeonCyan)
-                Text("Used for automated stake setting, clicking & balance reading", style = MaterialTheme.typography.bodySmall, color = TextMuted)
-
                 Spacer(modifier = Modifier.height(10.dp))
 
-                OutlinedTextField(
-                    value = stakeInputSel,
-                    onValueChange = {
-                        stakeInputSel = it
-                        onSelectorsChanged(selectors.copy(stakeInputSelector = it))
-                    },
-                    label = { Text("Stake Input Selector") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NeonCyan, unfocusedBorderColor = BorderDark)
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = upBtnSel,
-                    onValueChange = {
-                        upBtnSel = it
-                        onSelectorsChanged(selectors.copy(upButtonSelector = it))
-                    },
-                    label = { Text("CALL / UP Button Selector") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NeonGreen, unfocusedBorderColor = BorderDark)
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = downBtnSel,
-                    onValueChange = {
-                        downBtnSel = it
-                        onSelectorsChanged(selectors.copy(downButtonSelector = it))
-                    },
-                    label = { Text("PUT / DOWN Button Selector") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NeonRed, unfocusedBorderColor = BorderDark)
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = balanceSel,
-                    onValueChange = {
-                        balanceSel = it
-                        onSelectorsChanged(selectors.copy(balanceSelector = it))
-                    },
-                    label = { Text("Account Balance Selector") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NeonBlue, unfocusedBorderColor = BorderDark)
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = resultSel,
-                    onValueChange = {
-                        resultSel = it
-                        onSelectorsChanged(selectors.copy(resultSelector = it))
-                    },
-                    label = { Text("Trade Result / Payout Selector") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NeonYellow, unfocusedBorderColor = BorderDark)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // 4. Timeframe Selectors
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, BorderDark, RoundedCornerShape(12.dp)),
-            colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text("TIMEFRAME SELECTORS", style = MaterialTheme.typography.titleSmall, color = NeonBlue)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = sel1m,
-                    onValueChange = {
-                        sel1m = it
-                        onProfileChanged(profile.copy(timeframe1mSelector = it))
-                    },
-                    label = { Text("1m Selector") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = sel5m,
-                    onValueChange = {
-                        sel5m = it
-                        onProfileChanged(profile.copy(timeframe5mSelector = it))
-                    },
-                    label = { Text("5m Selector") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = sel15m,
-                    onValueChange = {
-                        sel15m = it
-                        onProfileChanged(profile.copy(timeframe15mSelector = it))
-                    },
-                    label = { Text("15m Selector") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // 5. Audio & Haptics
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, BorderDark, RoundedCornerShape(12.dp)),
-            colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
+                // Sound & Haptic
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Sound Chimes", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Audio", tint = NeonBlue, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Audio Alert Tones", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                    }
                     Switch(checked = soundEnabled, onCheckedChange = onSoundToggled)
                 }
 
+                Spacer(modifier = Modifier.height(8.dp))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Haptic Feedback", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Vibration, contentDescription = "Haptic", tint = NeonBlue, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Haptic Feedback Pulses", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                    }
                     Switch(checked = hapticEnabled, onCheckedChange = onHapticToggled)
                 }
             }
@@ -479,57 +353,63 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(
-            onClick = onResetPresets,
-            colors = ButtonDefaults.buttonColors(containerColor = BackgroundElevated),
-            modifier = Modifier.fillMaxWidth()
+        // 3. Color Calibration
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, BorderDark, RoundedCornerShape(12.dp)),
+            colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+            shape = RoundedCornerShape(12.dp)
         ) {
-            Icon(Icons.Default.RestartAlt, contentDescription = "Reset", tint = TextSecondary)
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("RESTORE DEFAULT PRESETS & SELECTORS", color = TextSecondary)
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-    }
-
-    // REAL Account Confirmation Dialog
-    if (showRealConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showRealConfirmDialog = false },
-            title = {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Palette, contentDescription = "Calibration", tint = NeonBlue)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "CHART CANDLE COLOR CALIBRATION",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 Text(
-                    text = "SWITCH TO REAL CAPITAL MODE?",
-                    color = NeonRed,
-                    fontWeight = FontWeight.Bold
+                    text = "Starting colors: #26A69A (Up) / #EF5350 (Down). Adjust tolerance for broker themes.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
                 )
-            },
-            text = {
-                Text(
-                    text = "You are activating REAL capital execution on your broker account.\n\n" +
-                            "• All automated trades will execute with REAL funds.\n" +
-                            "• Hard stop loss limits ($$dailyLossLimit max daily loss) and max 1 trade at a time are enforced.\n" +
-                            "• Signals are statistical probabilities, never guarantees.\n\n" +
-                            "Do you understand the financial risks and wish to proceed?",
-                    color = TextPrimary
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onAccountModeChanged(AccountMode.REAL)
-                        showRealConfirmDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonRed)
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("I UNDERSTAND THE RISK • ENABLE REAL", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Pixel Matching Distance Tolerance:", style = MaterialTheme.typography.bodySmall, color = TextPrimary)
+                    Text("${calibration.tolerance}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = NeonBlue)
                 }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { showRealConfirmDialog = false }) {
-                    Text("CANCEL", color = TextSecondary)
+                Slider(
+                    value = calibration.tolerance.toFloat(),
+                    onValueChange = { onCalibrationChanged(calibration.copy(tolerance = it.toInt())) },
+                    valueRange = 15f..90f,
+                    colors = SliderDefaults.colors(thumbColor = NeonBlue, activeTrackColor = NeonBlue)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Button(
+                    onClick = onResetPresets,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(40.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BackgroundElevated),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.RestartAlt, contentDescription = "Reset", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("RESET COLOR CALIBRATION PRESETS", fontSize = 12.sp, color = TextSecondary)
                 }
-            },
-            containerColor = BackgroundElevated
-        )
+            }
+        }
     }
 }

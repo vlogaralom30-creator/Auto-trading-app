@@ -1,4 +1,4 @@
-package com.example.knowledge
+package com.example.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -13,13 +13,13 @@ data class KnowledgePack(
     @SerialName("multi_timeframe") val multiTimeframe: MultiTimeframeConfig,
     @SerialName("site_profiles") val siteProfiles: Map<String, JsonElement>,
     val features: Map<String, JsonElement>,
-    @SerialName("trend_rules") val trendRules: List<TrendRuleConfig>,
+    @SerialName("trend_rules") val trendRules: List<TrendRuleJson>,
     @SerialName("support_resistance") val supportResistance: Map<String, JsonElement>,
-    val patterns: List<PatternConfig>,
+    val patterns: List<PatternDefJson>,
     @SerialName("confluence_scoring") val confluenceScoring: ConfluenceScoringConfig,
     @SerialName("no_trade_filters") val noTradeFilters: List<String>,
-    @SerialName("expiry_suggestion") val expirySuggestion: Map<String, String>,
-    @SerialName("builtin_rules") val builtinRules: List<BuiltinRuleConfig>,
+    @SerialName("expiry_suggestion") val expirySuggestion: Map<String, String> = emptyMap(),
+    @SerialName("builtin_rules") val builtinRules: List<BuiltinRuleJson>,
     val learning: LearningConfig,
     val validation: ValidationConfig
 )
@@ -29,7 +29,7 @@ data class ConfidenceConfig(
     val base: Double = 0.5,
     @SerialName("max_cap") val maxCap: Double = 0.78,
     @SerialName("min_to_signal") val minToSignal: Double = 0.6,
-    val method: String = "logistic(sum(signed_weight_i * quality_i))",
+    val method: String = "",
     val calibration: String = ""
 )
 
@@ -52,21 +52,21 @@ data class AutoViewConfig(
 )
 
 @Serializable
-data class TrendRuleConfig(
+data class TrendRuleJson(
     val id: String,
-    val whenCondition: String? = null,
+    @SerialName("when") val whenCondition: String = "",
     val label: String? = null,
-    val weight: Double = 0.05
+    val weight: Double? = null
 )
 
 @Serializable
-data class PatternConfig(
+data class PatternDefJson(
     val id: String,
     val name: String,
     val direction: String,
     val detect: String,
     @SerialName("context_required") val contextRequired: String? = null,
-    @SerialName("weight_with_context") val weightWithContext: Double = 0.1,
+    @SerialName("weight_with_context") val weightWithContext: Double = 0.0,
     @SerialName("weight_without_context") val weightWithoutContext: Double = 0.0,
     val effect: String? = null,
     val notes: String? = null
@@ -76,8 +76,8 @@ data class PatternConfig(
 data class ConfluenceScoringConfig(
     val formula: String,
     val quality: String,
-    val components: List<ConfluenceComponentConfig> = emptyList(),
-    val output: Map<String, String> = emptyMap()
+    val components: List<ConfluenceComponentConfig>,
+    val output: ConfluenceOutputConfig
 )
 
 @Serializable
@@ -87,21 +87,32 @@ data class ConfluenceComponentConfig(
 )
 
 @Serializable
-data class BuiltinRuleConfig(
+data class ConfluenceOutputConfig(
+    val signal: String,
+    val confidence: String,
+    val reasons: String
+)
+
+@Serializable
+data class BuiltinRuleJson(
     val id: String,
     val name: String,
-    val conditions: RuleConditionsConfig,
+    val conditions: BuiltinConditionsGroupJson? = null,
     val outcome: String,
-    val weight: Double
+    val weight: Double = 0.1,
+    @SerialName("prior_strength") val priorStrength: Int = 10,
+    val winCount: Int = 0,
+    val lossCount: Int = 0,
+    val source: String = "builtin"
 )
 
 @Serializable
-data class RuleConditionsConfig(
-    val all: List<ConditionItemConfig> = emptyList()
+data class BuiltinConditionsGroupJson(
+    val all: List<BuiltinConditionClauseJson> = emptyList()
 )
 
 @Serializable
-data class ConditionItemConfig(
+data class BuiltinConditionClauseJson(
     val feature: String,
     val op: String,
     val value: JsonElement
@@ -123,4 +134,11 @@ data class ValidationConfig(
     val backtest: String = "",
     @SerialName("demo_phase") val demoPhase: String = "",
     @SerialName("breakeven_note") val breakevenNote: String = ""
+)
+
+@Serializable
+data class SiteProfileConfig(
+    @SerialName("timeframe_selector") val timeframeSelector: String = "VERIFY_IN_DEVTOOLS",
+    @SerialName("zoom_method") val zoomMethod: String = "wheel_event_on_chart_canvas",
+    @SerialName("candle_colors") val candleColors: Map<String, String> = mapOf("up" to "#26A69A", "down" to "#EF5350")
 )

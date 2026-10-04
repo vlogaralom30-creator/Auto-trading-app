@@ -4,6 +4,7 @@ import com.example.data.entity.RuleEntity
 import com.example.model.Candle
 import com.example.model.ChartAnalysisResult
 import com.example.model.PatternMatchResult
+import com.example.model.ScoringContribution
 import com.example.model.SupportResistanceZone
 import com.example.model.SwingPoint
 import com.example.model.TrendDirection
@@ -13,23 +14,87 @@ import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 
-/**
- * Confluence Scoring & No-Trade Filter Engine
- * Built strictly per ChartMind Knowledge Pack specification.
- */
 object RuleMatchingEngine {
 
-    private const val CONFIDENCE_BASE = 0.50
-    private const val CONFIDENCE_MAX_CAP = 0.78f
+    private const val K_FACTOR = 6.0
     private const val MIN_TO_SIGNAL = 0.60f
-    private const val LOGISTIC_K = 6.0
+    private const val MAX_CONFIDENCE_CAP = 0.78f
 
-    data class ScoredComponent(
-        val name: String,
-        val description: String,
-        val signedContribution: Double,
-        val absMagnitude: Double
+    data class FilterCheckResult(
+        val isBlocked: Boolean,
+        val reason: String?
     )
+
+    fun checkNoTradeFilters(
+        candles: List<Candle>,
+        atr: Float,
+        trendEval: TrendDetector.TrendEvaluation,
+        srZones: List<SupportResistanceZone>,
+        higherTfTrend: TrendDirection?,
+        candidateSignal: String,
+        hasFakeoutConfirmation: Boolean,
+        consecutiveLosses: Int,
+        signalsToday: Int,
+        dailyLimit: Int,
+        isNewsWindowFlagged: Boolean
+    ): FilterCheckResult {
+        // 1. fewer than 30 candles visible
+        if (candles.size < 30) {
+            return FilterCheckResult(true, "Blocked: Fewer than 30 candles visible (Insufficient price action history)")
+        }
+
+        // 2. latest candle range > 3*ATR (news spike)
+        val latest = candles.last()
+        if (latest.range > (3f * atr)) {
+            return FilterCheckResult(true, "Blocked: Latest candle range exceeds 3x ATR (News spike volatility)")
+        }
+
+        // 3. ATR below 0.3 * average ATR of last 100 candles (dead market)
+        if (candles.size >= 35) {
+            val longWindow = candles.takeLast(100)
+            val avgLongAtr = longWindow.map { it.range }.average().toFloat()
+            if (avgLongAtr > 0 && atr < (0.30f * avgLongAtr)) {
+                return FilterCheckResult(true, "Blocked: Volatility below 30% of average (Inactive / dead market)")
+            }
+        }
+
+        // 4. trend = SIDEWAYS and price is in the middle 50% of the range
+        if (trendEval.isSidewaysMiddle50) {
+            return FilterCheckResult(true, "Blocked: Range-bound consolidation; price hovering in middle 50% without edge")
+        }
+
+        // 5. price is inside a strong S/R zone with no confirmation candle yet
+        val insideStrongZone = srZones.any { it.containsPrice(latest.closeY) && it.strengthScore >= 3.0f }
+        if (insideStrongZone && (latest.isDoji || latest.bodyRatio < 0.20f)) {
+            return FilterCheckResult(true, "Blocked: Price inside major S/R zone without directional confirmation candle")
+        }
+
+        // 6. signal direction is against a strong higher timeframe trend and no fakeout confirmation
+        if (higherTfTrend != null && higherTfTrend != TrendDirection.SIDEWAYS) {
+            val isConflict = (candidateSignal == "UP" && higherTfTrend == TrendDirection.DOWNTREND) ||
+                    (candidateSignal == "DOWN" && higherTfTrend == TrendDirection.UPTREND)
+            if (isConflict && !hasFakeoutConfirmation) {
+                return FilterCheckResult(true, "Blocked: Signal conflicts with higher timeframe trend without fakeout confirmation")
+            }
+        }
+
+        // 7. 3 losses in a row (cooldown 30 min)
+        if (consecutiveLosses >= 3) {
+            return FilterCheckResult(true, "Blocked: 3 consecutive losses hit. 30-minute emotional risk cooldown active.")
+        }
+
+        // 8. daily signal limit reached
+        if (signalsToday >= dailyLimit) {
+            return FilterCheckResult(true, "Blocked: Daily discipline limit ($dailyLimit signals) reached.")
+        }
+
+        // 9. user-flagged news time window
+        if (isNewsWindowFlagged) {
+            return FilterCheckResult(true, "Blocked: High-impact economic news release window active.")
+        }
+
+        return FilterCheckResult(false, null)
+    }
 
     fun evaluateChart(
         bitmapWidth: Int,
@@ -38,340 +103,264 @@ object RuleMatchingEngine {
         swings: List<SwingPoint>,
         srZones: List<SupportResistanceZone>,
         trendLines: List<TrendLine>,
-        trendDirection: TrendDirection,
-        breakoutHint: String?,
-        breakoutScore: Float = 0f,
-        patterns: List<PatternMatchResult>,
-        ema9: List<Pair<Float, Float>>,
-        ema21: List<Pair<Float, Float>>,
-        rsi: Float?,
+        trendEval: TrendDetector.TrendEvaluation,
         atr: Float,
+        breakoutHint: String?,
+        isBreakout: Boolean,
+        isFakeout: Boolean,
+        patterns: List<PatternMatchResult>,
+        ema20: List<Pair<Float, Float>>,
+        ema50: List<Pair<Float, Float>>,
+        rsi: Float?,
         momentum: Float,
         activeRules: List<RuleEntity>,
-        timeframe: String = "1m",
-        higherTfTrend: String = "ANY",
-        m5Trend: String = "ANY",
+        higherTfTrend: TrendDirection? = null,
+        isHigherTfAgree: Boolean = false,
         consecutiveLosses: Int = 0,
-        dailySignalsUsed: Int = 0,
-        dailySignalLimit: Int = 10,
-        isUserNewsWindow: Boolean = false,
+        signalsToday: Int = 0,
+        dailyLimit: Int = 10,
+        isNewsWindowFlagged: Boolean = false,
+        timeframe: String = "1m",
         executionDurationMs: Long = 0L
     ): ChartAnalysisResult {
-        // Base case: empty or invalid
         if (candles.isEmpty()) {
             return ChartAnalysisResult(
                 bitmapWidth = bitmapWidth,
                 bitmapHeight = bitmapHeight,
                 overallSignal = "NEUTRAL",
-                confidenceScore = 0f,
+                confidenceScore = 0.5f,
                 reasonList = listOf("No distinct candles detected in chart viewport"),
                 analysisTimeMs = executionDurationMs
             )
         }
 
-        val latestCandle = candles.last()
-        val components = mutableListOf<ScoredComponent>()
+        val latest = candles.last()
+        val contributions = mutableListOf<ScoringContribution>()
+        val contributingRules = mutableListOf<String>()
 
-        // -------------------------------------------------------------
-        // Check "no_trade_filters" FIRST
-        // -------------------------------------------------------------
-        var blockReason: String? = null
-
-        // 1. Fewer than 30 candles visible (or fewer than 15 in prototype)
-        if (candles.size < 20) {
-            blockReason = "Fewer than 20 candles visible (need sufficient historical price action)"
-        }
-
-        // 2. Latest candle range > 3*ATR (news spike)
-        if (blockReason == null && latestCandle.range > (3f * atr)) {
-            blockReason = "Latest candle range (${latestCandle.range.toInt()}px) > 3*ATR (${(3 * atr).toInt()}px) - high-volatility news spike"
-        }
-
-        // 3. ATR below 0.3 * average ATR of last 100 candles (dead market)
-        if (blockReason == null && candles.size >= 25) {
-            val longTermAtr = candles.map { it.range }.average().toFloat()
-            if (atr < (0.30f * longTermAtr)) {
-                blockReason = "Market volatility dead: ATR (${atr.toInt()}px) < 0.3*historical average (${(0.3 * longTermAtr).toInt()}px)"
-            }
-        }
-
-        // 4. Sideways trend and price in the middle 50% of the range
-        if (blockReason == null && trendDirection == TrendDirection.SIDEWAYS && srZones.size >= 2) {
-            val nearestSup = srZones.filter { it.isSupport }.minByOrNull { abs(it.yLevel - latestCandle.closeY) }
-            val nearestRes = srZones.filter { !it.isSupport }.minByOrNull { abs(it.yLevel - latestCandle.closeY) }
-            if (nearestSup != null && nearestRes != null && nearestSup.yLevel > nearestRes.yLevel) {
-                val totalSpan = nearestSup.yLevel - nearestRes.yLevel
-                val distFromSup = nearestSup.yLevel - latestCandle.closeY
-                val ratio = distFromSup / totalSpan
-                if (ratio in 0.25f..0.75f) {
-                    blockReason = "Sideways trend: price is caught in the middle 50% equilibrium of the range"
-                }
-            }
-        }
-
-        // 5. Consecutive losses cooldown (3 losses in a row)
-        if (blockReason == null && consecutiveLosses >= 3) {
-            blockReason = "Cooldown enforced: 3 consecutive losses (pause to protect capital)"
-        }
-
-        // 6. Daily signal limit reached
-        if (blockReason == null && dailySignalsUsed >= dailySignalLimit) {
-            blockReason = "Daily signal ceiling reached ($dailySignalsUsed/$dailySignalLimit trades used today)"
-        }
-
-        // 7. User-flagged news window
-        if (blockReason == null && isUserNewsWindow) {
-            blockReason = "User-flagged major news event window active (trading paused)"
-        }
-
-        // -------------------------------------------------------------
-        // Confluence Scoring Components:
-        // score = sum(direction_sign * weight * quality)
-        // -------------------------------------------------------------
-
-        // Component 1: Pattern in context [0.0, 0.14]
-        val activePattern = patterns.lastOrNull()
-        if (activePattern != null && activePattern.hasContext) {
-            val dirSign = when (activePattern.direction) {
-                "UP" -> 1.0
-                "DOWN" -> -1.0
-                else -> 0.0
-            }
-            val quality = (activePattern.confidence).coerceIn(0.5f, 1.0f).toDouble()
-            val w = activePattern.weight.toDouble().coerceIn(0.0, 0.14)
-            val contrib = dirSign * w * quality
-            components.add(
-                ScoredComponent(
-                    name = "pattern_in_context",
-                    description = "${activePattern.patternName} in context (${(activePattern.confidence * 100).toInt()}% conf)",
-                    signedContribution = contrib,
-                    absMagnitude = abs(contrib)
+        // 1. pattern_in_context: [0.0, 0.14]
+        val recentPatterns = patterns.filter { it.candleIndex >= (candles.size - 2) }
+        val bestPattern = recentPatterns.maxByOrNull { it.weight * it.quality }
+        if (bestPattern != null && bestPattern.weight > 0f) {
+            val sign = if (bestPattern.direction == "UP") 1f else if (bestPattern.direction == "DOWN") -1f else 0f
+            val contrib = (bestPattern.weight * bestPattern.quality).coerceIn(0f, 0.14f)
+            contributions.add(
+                ScoringContribution(
+                    componentName = "pattern_in_context",
+                    signedContribution = sign * contrib,
+                    description = "${bestPattern.patternName} in context (+${(contrib * 100).toInt()}% ${bestPattern.direction})"
                 )
             )
+            contributingRules.add(bestPattern.patternName)
         }
 
-        // Component 2: Support & Resistance Position [0.0, 0.12]
-        val nearThreshold = maxOf(6f, 0.50f * atr)
-        val nearestSupport = srZones.filter { it.isSupport }.minByOrNull { abs(it.yLevel - latestCandle.closeY) }
-        val nearestResistance = srZones.filter { !it.isSupport }.minByOrNull { abs(it.yLevel - latestCandle.closeY) }
+        // 2. support_resistance_position: [0.0, 0.12]
+        val nearestSupport = srZones.filter { it.isSupport }.minByOrNull { abs(it.yLevel - latest.closeY) }
+        val nearestResistance = srZones.filter { !it.isSupport }.minByOrNull { abs(it.yLevel - latest.closeY) }
 
-        val supportDist = nearestSupport?.let { abs(it.yLevel - latestCandle.closeY) }
-        val resistanceDist = nearestResistance?.let { abs(it.yLevel - latestCandle.closeY) }
+        val supportDist = nearestSupport?.let { abs(it.yLevel - latest.closeY) }
+        val resistanceDist = nearestResistance?.let { abs(it.yLevel - latest.closeY) }
 
-        val isNearSupport = supportDist != null && supportDist <= nearThreshold
-        val isNearResistance = resistanceDist != null && resistanceDist <= nearThreshold
+        val isNearSupport = supportDist != null && supportDist <= (0.5f * atr)
+        val isNearResistance = resistanceDist != null && resistanceDist <= (0.5f * atr)
 
         if (isNearSupport && nearestSupport != null) {
-            val strength = nearestSupport.strengthScore.coerceIn(0.5f, 1.0f).toDouble()
-            val contrib = 1.0 * 0.12 * strength
-            components.add(
-                ScoredComponent(
-                    name = "support_resistance_position",
-                    description = "Holding at Support Floor (${nearestSupport.touchCount}x touches, ${(nearestSupport.strengthScore * 100).toInt()}% strength)",
-                    signedContribution = contrib,
-                    absMagnitude = contrib
+            val srQuality = (nearestSupport.strengthScore / 5f).coerceIn(0.5f, 1.0f)
+            val contrib = (0.12f * srQuality).coerceIn(0.04f, 0.12f)
+            contributions.add(
+                ScoringContribution(
+                    componentName = "support_resistance_position",
+                    signedContribution = contrib, // Bullish bounce at support
+                    description = "Support zone proximity (${nearestSupport.touchCount} touches, +${(contrib * 100).toInt()}%)"
                 )
             )
         } else if (isNearResistance && nearestResistance != null) {
-            val strength = nearestResistance.strengthScore.coerceIn(0.5f, 1.0f).toDouble()
-            val contrib = -1.0 * 0.12 * strength
-            components.add(
-                ScoredComponent(
-                    name = "support_resistance_position",
-                    description = "Testing Resistance Ceiling (${nearestResistance.touchCount}x touches, ${(nearestResistance.strengthScore * 100).toInt()}% strength)",
-                    signedContribution = contrib,
-                    absMagnitude = abs(contrib)
+            val srQuality = (nearestResistance.strengthScore / 5f).coerceIn(0.5f, 1.0f)
+            val contrib = (0.12f * srQuality).coerceIn(0.04f, 0.12f)
+            contributions.add(
+                ScoringContribution(
+                    componentName = "support_resistance_position",
+                    signedContribution = -contrib, // Bearish rejection at resistance
+                    description = "Resistance zone proximity (${nearestResistance.touchCount} touches, -${(contrib * 100).toInt()}%)"
                 )
             )
         }
 
-        // Component 3: Trend alignment current TF [0.0, 0.08]
-        val trendSign = when (trendDirection) {
-            TrendDirection.UPTREND -> 1.0
-            TrendDirection.DOWNTREND -> -1.0
-            TrendDirection.SIDEWAYS -> 0.0
-        }
-        if (trendSign != 0.0) {
-            val contrib = trendSign * 0.08
-            components.add(
-                ScoredComponent(
-                    name = "trend_alignment_current_tf",
-                    description = "Trend aligned with ${trendDirection.name} on $timeframe",
-                    signedContribution = contrib,
-                    absMagnitude = abs(contrib)
+        // 3. trend_alignment_current_tf: [0.0, 0.08]
+        when (trendEval.direction) {
+            TrendDirection.UPTREND -> contributions.add(
+                ScoringContribution(
+                    componentName = "trend_alignment_current_tf",
+                    signedContribution = 0.08f,
+                    description = "Current timeframe dominant Uptrend (+8%)"
                 )
             )
+            TrendDirection.DOWNTREND -> contributions.add(
+                ScoringContribution(
+                    componentName = "trend_alignment_current_tf",
+                    signedContribution = -0.08f,
+                    description = "Current timeframe dominant Downtrend (-8%)"
+                )
+            )
+            TrendDirection.SIDEWAYS -> {}
         }
 
-        // Component 4: Higher timeframe alignment [-0.15, 0.10]
-        // "If 15m trend conflicts with signal direction, subtract 0.15 from score; if 15m and 5m both agree, add 0.10."
-        var htfContrib = 0.0
-        if (higherTfTrend != "ANY") {
-            val htfSign = if (higherTfTrend == "UP") 1.0 else if (higherTfTrend == "DOWN") -1.0 else 0.0
-            if (htfSign != 0.0) {
-                if (m5Trend == higherTfTrend) {
-                    htfContrib = htfSign * 0.10 // Both 15m and 5m agree
-                    components.add(
-                        ScoredComponent(
-                            name = "higher_tf_alignment",
-                            description = "Multi-timeframe consensus: 15m & 5m both confirm $higherTfTrend trend (+0.10)",
-                            signedContribution = htfContrib,
-                            absMagnitude = abs(htfContrib)
-                        )
+        // 4. higher_tf_alignment: [-0.15, 0.10]
+        if (higherTfTrend != null) {
+            if (isHigherTfAgree) {
+                contributions.add(
+                    ScoringContribution(
+                        componentName = "higher_tf_alignment",
+                        signedContribution = if (trendEval.direction == TrendDirection.UPTREND) 0.10f else -0.10f,
+                        description = "Multi-timeframe consensus: 15m & 5m both agree (+10%)"
                     )
-                } else {
-                    htfContrib = htfSign * 0.06
-                    components.add(
-                        ScoredComponent(
-                            name = "higher_tf_alignment",
-                            description = "15m macro trend confirms $higherTfTrend",
-                            signedContribution = htfContrib,
-                            absMagnitude = abs(htfContrib)
-                        )
+                )
+            } else if (higherTfTrend != TrendDirection.SIDEWAYS && higherTfTrend != trendEval.direction) {
+                val penalty = if (higherTfTrend == TrendDirection.DOWNTREND) -0.15f else 0.15f
+                contributions.add(
+                    ScoringContribution(
+                        componentName = "higher_tf_alignment",
+                        signedContribution = penalty,
+                        description = "Higher 15m timeframe trend bias alignment (${if (penalty > 0) "+15%" else "-15%"})"
                     )
-                }
+                )
             }
         }
 
-        // Component 5: Breakout / Retest / Fakeout [0.0, 0.10]
-        if (breakoutHint != null && breakoutScore != 0f) {
-            val contrib = breakoutScore.toDouble().coerceIn(-0.10, 0.10)
-            components.add(
-                ScoredComponent(
-                    name = "breakout_retest_or_fakeout",
-                    description = breakoutHint,
-                    signedContribution = contrib,
-                    absMagnitude = abs(contrib)
+        // 5. breakout_retest_or_fakeout: [0.0, 0.1]
+        if (isBreakout && breakoutHint != null) {
+            val sign = if (breakoutHint.contains("Bullish", true) || breakoutHint.contains("Support", true)) 1f else -1f
+            contributions.add(
+                ScoringContribution(
+                    componentName = "breakout_retest_or_fakeout",
+                    signedContribution = sign * 0.08f,
+                    description = breakoutHint
+                )
+            )
+        } else if (isFakeout && breakoutHint != null) {
+            // Fakeout rejection: opposite to break direction
+            val sign = if (breakoutHint.contains("Support", true)) 1f else -1f
+            contributions.add(
+                ScoringContribution(
+                    componentName = "breakout_retest_or_fakeout",
+                    signedContribution = sign * 0.10f,
+                    description = breakoutHint
                 )
             )
         }
 
-        // Component 6: Taught Rules Match [-0.20, 0.20]
-        var matchedRuleName: String? = null
-        for (rule in activeRules.filter { it.isEnabled }) {
-            var matchesPattern = rule.patternType == "ANY" || patterns.any { it.patternName.equals(rule.patternType, ignoreCase = true) }
-            val matchesTrend = rule.requiredTrend == "ANY" || (trendDirection == TrendDirection.UPTREND && rule.requiredTrend == "UP") ||
-                    (trendDirection == TrendDirection.DOWNTREND && rule.requiredTrend == "DOWN") ||
-                    (trendDirection == TrendDirection.SIDEWAYS && rule.requiredTrend == "SIDEWAYS")
-            val matchesSupport = !rule.requireNearSupport || isNearSupport
-            val matchesResistance = !rule.requireNearResistance || isNearResistance
-
-            if (rule.patternType == "BREAKOUT") matchesPattern = breakoutScore > 0f
-            if (rule.patternType == "BREAKDOWN") matchesPattern = breakoutScore < 0f
-            if (rule.patternType == "FAKEOUT_RESISTANCE") matchesPattern = breakoutHint?.contains("Fakeout above", true) == true
-            if (rule.patternType == "FAKEOUT_SUPPORT") matchesPattern = breakoutHint?.contains("Fakeout below", true) == true
-
-            if (matchesPattern && matchesTrend && matchesSupport && matchesResistance) {
-                matchedRuleName = rule.name
-                val dirSign = if (rule.outcome.equals("UP", true)) 1.0 else if (rule.outcome.equals("DOWN", true)) -1.0 else 0.0
-                val contrib = (dirSign * rule.weight.toDouble()).coerceIn(-0.20, 0.20)
-                components.add(
-                    ScoredComponent(
-                        name = "taught_rules_match",
-                        description = "Rule matched: '${rule.name}' (${(rule.winRate).toInt()}% WR, w=${rule.weight})",
-                        signedContribution = contrib,
-                        absMagnitude = abs(contrib)
-                    )
-                )
-                break
+        // 6. taught_rules_match: [-0.2, 0.2]
+        var taughtScore = 0f
+        for (rule in activeRules) {
+            val patternMatches = recentPatterns.any {
+                it.patternName.equals(rule.patternType, ignoreCase = true) ||
+                        it.patternId.equals(rule.patternType, ignoreCase = true) ||
+                        rule.patternType.equals("CUSTOM", ignoreCase = true) ||
+                        rule.patternType.equals("ANY", ignoreCase = true)
             }
+            if (!patternMatches && !rule.patternType.equals("TREND", ignoreCase = true) && !rule.patternType.equals("EMA_PULLBACK", ignoreCase = true)) {
+                continue
+            }
+
+            val trendMatches = when (rule.requiredTrend.uppercase()) {
+                "UP" -> trendEval.direction == TrendDirection.UPTREND
+                "DOWN" -> trendEval.direction == TrendDirection.DOWNTREND
+                "SIDEWAYS" -> trendEval.direction == TrendDirection.SIDEWAYS
+                else -> true
+            }
+            if (!trendMatches) continue
+            if (rule.requireNearSupport && !isNearSupport) continue
+            if (rule.requireNearResistance && !isNearResistance) continue
+
+            val ruleSign = if (rule.outcome.equals("UP", true)) 1f else -1f
+            val ruleWeight = rule.weight.coerceIn(0.05f, 0.20f)
+            taughtScore += (ruleSign * ruleWeight)
+            contributingRules.add(rule.name)
         }
 
-        // Component 7: Momentum, EMA, RSI [-0.05, 0.05]
-        var momContrib = 0.0
-        if (rsi != null) {
-            if (rsi <= 30f) {
-                momContrib += 0.03 // Oversold => bounce UP
-            } else if (rsi >= 70f) {
-                momContrib -= 0.03 // Overbought => pullback DOWN
-            }
-        }
-        if (ema9.size >= 2 && ema21.size >= 2) {
-            val fastY = ema9.last().second
-            val slowY = ema21.last().second
-            // smaller Y = higher price
-            if (fastY < slowY) momContrib += 0.02 else momContrib -= 0.02
-        }
-        momContrib = momContrib.coerceIn(-0.05, 0.05)
-        if (abs(momContrib) > 0.01) {
-            val desc = if (momContrib > 0) "Bullish Momentum: EMA crossover & RSI=${rsi?.toInt() ?: 50}"
-            else "Bearish Momentum: EMA crossover & RSI=${rsi?.toInt() ?: 50}"
-            components.add(
-                ScoredComponent(
-                    name = "momentum_ema_rsi",
-                    description = desc,
-                    signedContribution = momContrib,
-                    absMagnitude = abs(momContrib)
+        if (taughtScore != 0f) {
+            val clampedTaught = taughtScore.coerceIn(-0.20f, 0.20f)
+            contributions.add(
+                ScoringContribution(
+                    componentName = "taught_rules_match",
+                    signedContribution = clampedTaught,
+                    description = "Active Rule match confluence (${if (clampedTaught > 0) "+" else ""}${(clampedTaught * 100).toInt()}%)"
                 )
             )
         }
 
-        // -------------------------------------------------------------
-        // Confluence Total Score & Logistic Probability
-        // formula: score = sum(signed_weight * quality)
-        // p_up = 1 / (1 + exp(-k * score)), k = 6.0
-        // -------------------------------------------------------------
-        val totalScore = components.sumOf { it.signedContribution }
-
-        // Additional higher timeframe conflict penalty:
-        // "If 15m trend conflicts with signal direction, subtract 0.15 from score"
-        val rawPUp = 1.0 / (1.0 + exp(-LOGISTIC_K * totalScore))
-
-        var finalPUp = rawPUp
-        if (higherTfTrend == "DOWN" && rawPUp > 0.5) {
-            // Conflict with 15m downtrend
-            finalPUp = 1.0 / (1.0 + exp(-LOGISTIC_K * (totalScore - 0.15)))
-        } else if (higherTfTrend == "UP" && rawPUp < 0.5) {
-            // Conflict with 15m uptrend
-            finalPUp = 1.0 / (1.0 + exp(-LOGISTIC_K * (totalScore + 0.15)))
+        // 7. momentum_ema_rsi: [-0.05, 0.05]
+        var techContrib = trendEval.emaBiasWeight
+        rsi?.let {
+            if (it <= 30f) techContrib += 0.03f // oversold bounce
+            else if (it >= 70f) techContrib -= 0.03f // overbought rejection
+        }
+        val clampedTech = techContrib.coerceIn(-0.05f, 0.05f)
+        if (clampedTech != 0f) {
+            contributions.add(
+                ScoringContribution(
+                    componentName = "momentum_ema_rsi",
+                    signedContribution = clampedTech,
+                    description = "EMA20/50 & RSI momentum bias (${if (clampedTech > 0) "+" else ""}${(clampedTech * 100).toInt()}%)"
+                )
+            )
         }
 
-        val pDown = 1.0 - finalPUp
-        val maxProb = max(finalPUp, pDown).toFloat()
+        // Confluence Scoring formula:
+        // score = sum(direction_sign * weight * quality)
+        // p_up = 1 / (1 + exp(-k * score)); k = 6
+        val netScore = contributions.sumOf { it.signedContribution.toDouble() }
+        val pUp = (1.0 / (1.0 + exp(-K_FACTOR * netScore))).toFloat()
 
-        // Apply confidence cap: min(max(p_up, 1-p_up), confidence.max_cap) = 0.78
-        val cappedConfidence = min(maxProb, CONFIDENCE_MAX_CAP)
-
-        // Signal rule: UP if p_up >= min_to_signal (0.60); DOWN if (1-p_up) >= 0.60; else NEUTRAL
-        var overallSignal = when {
-            finalPUp >= MIN_TO_SIGNAL -> "UP"
-            pDown >= MIN_TO_SIGNAL -> "DOWN"
+        // Output rules:
+        // signal: UP if p_up >= min_to_signal (0.6); DOWN if (1-p_up) >= min_to_signal; else NEUTRAL
+        val rawSignal = when {
+            pUp >= MIN_TO_SIGNAL -> "UP"
+            (1f - pUp) >= MIN_TO_SIGNAL -> "DOWN"
             else -> "NEUTRAL"
         }
 
-        // Check if signal conflicts with no-trade filter 4:
-        if (blockReason == null && higherTfTrend != "ANY") {
-            if (overallSignal == "UP" && higherTfTrend == "DOWN" && breakoutScore <= 0f) {
-                blockReason = "No-trade filter: Signal (UP) directly opposes strong 15m trend (DOWN) with no fakeout confirmation"
-            } else if (overallSignal == "DOWN" && higherTfTrend == "UP" && breakoutScore >= 0f) {
-                blockReason = "No-trade filter: Signal (DOWN) directly opposes strong 15m trend (UP) with no fakeout confirmation"
-            }
-        }
+        // confidence: min(max(p_up, 1-p_up), confidence.max_cap) (0.78)
+        val rawConfidence = min(max(pUp, 1f - pUp), MAX_CONFIDENCE_CAP)
 
-        // If blocked by any filter, neutralize signal and assign reason
-        val isBlocked = blockReason != null
-        if (isBlocked) {
-            overallSignal = "NEUTRAL"
-        }
+        // Top 3 contributing components in plain words
+        val topContributions = contributions
+            .sortedByDescending { abs(it.signedContribution) }
+            .take(3)
+        val topReasons = topContributions.map { it.description }
 
-        // Top 3 contributing components in plain words as reasons
-        val top3Components = components.sortedByDescending { it.absMagnitude }.take(3)
-        val reasonsList = mutableListOf<String>()
-        if (isBlocked) {
-            reasonsList.add("⛔ $blockReason")
-        }
-        for (c in top3Components) {
-            reasonsList.add(c.description)
-        }
-        if (reasonsList.isEmpty()) {
-            reasonsList.add("Neutral consolidation: No confluence confluence components reached threshold")
-        }
+        // Check No-Trade Filters
+        val filterCheck = checkNoTradeFilters(
+            candles = candles,
+            atr = atr,
+            trendEval = trendEval,
+            srZones = srZones,
+            higherTfTrend = higherTfTrend,
+            candidateSignal = rawSignal,
+            hasFakeoutConfirmation = isFakeout,
+            consecutiveLosses = consecutiveLosses,
+            signalsToday = signalsToday,
+            dailyLimit = dailyLimit,
+            isNewsWindowFlagged = isNewsWindowFlagged
+        )
 
-        // Expiry suggestion based on timeframe
-        val expiry = when (timeframe.lowercase()) {
+        val finalSignal = if (filterCheck.isBlocked) "NEUTRAL" else rawSignal
+        val finalConfidence = if (filterCheck.isBlocked) 0.50f else rawConfidence
+
+        val suggestedExpiry = when (timeframe.lowercase()) {
+            "1m" -> "1m to 3m"
             "5m" -> "5m to 15m"
             "15m" -> "15m to 45m"
-            else -> "1m to 3m"
+            else -> "1 to 3 candles"
+        }
+
+        val allReasons = mutableListOf<String>()
+        if (filterCheck.isBlocked) {
+            allReasons.add(filterCheck.reason ?: "Signal blocked by Risk Filter")
+        }
+        allReasons.addAll(topReasons)
+        if (allReasons.isEmpty()) {
+            allReasons.add("Equilibrium state; awaiting market structure confirmation")
         }
 
         return ChartAnalysisResult(
@@ -381,27 +370,28 @@ object RuleMatchingEngine {
             swings = swings,
             srZones = srZones,
             trendLines = trendLines,
-            trendDirection = trendDirection,
+            trendDirection = trendEval.direction,
+            atr14 = atr,
             breakoutHint = breakoutHint,
             detectedPatterns = patterns,
-            ema9Points = ema9,
-            ema21Points = ema21,
+            ema20Points = ema20,
+            ema50Points = ema50,
             rsiValue = rsi,
-            atr = atr,
             momentumScore = momentum,
-            overallSignal = overallSignal,
-            confidenceScore = cappedConfidence,
-            pUp = finalPUp.toFloat(),
-            isBlockedByFilter = isBlocked,
-            blockReason = blockReason,
-            reasonList = reasonsList,
-            matchedRule = matchedRuleName,
-            suggestedExpiry = expiry,
+            overallSignal = finalSignal,
+            pUp = pUp,
+            confidenceScore = finalConfidence,
+            reasonList = allReasons,
+            topContributingReasons = topReasons,
+            matchedRule = contributingRules.firstOrNull(),
+            contributingRuleNames = contributingRules,
+            suggestedExpiry = suggestedExpiry,
             nearestSupportDist = supportDist,
             nearestResistanceDist = resistanceDist,
-            timeframe = timeframe,
-            higherTfTrend = higherTfTrend,
-            analysisTimeMs = executionDurationMs
+            analysisTimeMs = executionDurationMs,
+            isBlocked = filterCheck.isBlocked,
+            blockedReason = filterCheck.reason,
+            timeframe = timeframe
         )
     }
 }

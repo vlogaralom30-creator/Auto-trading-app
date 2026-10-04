@@ -10,8 +10,7 @@ object RuleJsonHelper {
         val array = JSONArray()
         for (rule in rules) {
             val obj = JSONObject().apply {
-                put("id", rule.id)
-                put("ruleKey", rule.ruleKey)
+                put("id", rule.ruleId.ifEmpty { "user_${rule.id}" })
                 put("name", rule.name)
                 put("patternType", rule.patternType)
                 put("requiredTrend", rule.requiredTrend)
@@ -21,12 +20,12 @@ object RuleJsonHelper {
                 put("outcome", rule.outcome)
                 put("weight", rule.weight.toDouble())
                 put("priorStrength", rule.priorStrength)
-                put("priorWinRate", rule.priorWinRate.toDouble())
+                put("priorWeight", rule.priorWeight.toDouble())
                 put("winCount", rule.winCount)
                 put("lossCount", rule.lossCount)
+                put("source", rule.source)
                 put("notes", rule.notes)
                 put("isEnabled", rule.isEnabled)
-                put("source", rule.source)
             }
             array.put(obj)
         }
@@ -38,9 +37,10 @@ object RuleJsonHelper {
         val array = JSONArray(jsonString)
         for (i in 0 until array.length()) {
             val obj = array.getJSONObject(i)
+            val weightVal = obj.optDouble("weight", 0.10).toFloat()
             rules.add(
                 RuleEntity(
-                    ruleKey = obj.optString("ruleKey", ""),
+                    ruleId = obj.optString("id", obj.optString("ruleId", "custom_$i")),
                     name = obj.optString("name", "Custom Rule $i"),
                     patternType = obj.optString("patternType", "HAMMER"),
                     requiredTrend = obj.optString("requiredTrend", "ANY"),
@@ -48,14 +48,14 @@ object RuleJsonHelper {
                     requireNearResistance = obj.optBoolean("requireNearResistance", false),
                     minConfidence = obj.optDouble("minConfidence", 0.60).toFloat(),
                     outcome = obj.optString("outcome", "UP"),
-                    weight = obj.optDouble("weight", 0.10).toFloat(),
+                    weight = weightVal,
                     priorStrength = obj.optInt("priorStrength", 10),
-                    priorWinRate = obj.optDouble("priorWinRate", 0.50).toFloat(),
+                    priorWeight = obj.optDouble("priorWeight", weightVal.toDouble()).toFloat(),
                     winCount = obj.optInt("winCount", 0),
                     lossCount = obj.optInt("lossCount", 0),
+                    source = obj.optString("source", "user"),
                     notes = obj.optString("notes", ""),
-                    isEnabled = obj.optBoolean("isEnabled", true),
-                    source = obj.optString("source", "user")
+                    isEnabled = obj.optBoolean("isEnabled", true)
                 )
             )
         }

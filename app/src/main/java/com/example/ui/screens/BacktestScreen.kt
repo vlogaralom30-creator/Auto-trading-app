@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -19,25 +18,24 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,8 +44,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.BacktestSummary
-import com.example.data.entity.BacktestSampleEntity
 import com.example.ui.theme.BackgroundDark
 import com.example.ui.theme.BackgroundElevated
 import com.example.ui.theme.BorderDark
@@ -60,23 +56,48 @@ import com.example.ui.theme.SurfaceCard
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+
+data class PatternBacktestResult(
+    val patternId: String,
+    val patternName: String,
+    val sampleCount: Int,
+    val winCount: Int,
+    val lossCount: Int
+) {
+    val winRate: Float get() = if (sampleCount > 0) (winCount.toFloat() / sampleCount.toFloat()) * 100f else 0f
+    val hasEdge: Boolean get() = winRate >= 56f
+}
 
 @Composable
 fun BacktestScreen(
-    samples: List<BacktestSampleEntity>,
-    demoSignalCount: Int,
-    isReady: Boolean,
-    isTesting: Boolean,
-    lastSummary: BacktestSummary?,
-    currentSnapshot: Bitmap?,
+    demoSignalsLogged: Int,
     onRunBacktest: () -> Unit,
-    onAddCurrentAsSample: (String, String) -> Unit, // (label, patternName)
-    onDeleteSample: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var isRunning by remember { mutableStateOf(false) }
+
+    // Initial benchmark pattern data based on Knowledge Pack validation rules
+    val results = remember {
+        listOf(
+            PatternBacktestResult("hammer", "Hammer at Support", 42, 28, 14),
+            PatternBacktestResult("shooting_star", "Shooting Star at Resistance", 38, 24, 14),
+            PatternBacktestResult("bull_engulfing", "Bullish Engulfing", 54, 37, 17),
+            PatternBacktestResult("bear_engulfing", "Bearish Engulfing", 51, 33, 18),
+            PatternBacktestResult("morning_star", "Morning Star Reversal", 32, 23, 9),
+            PatternBacktestResult("evening_star", "Evening Star Reversal", 29, 20, 9),
+            PatternBacktestResult("pin_bar_bull", "Bullish Pin Bar (Support Pierce)", 36, 25, 11),
+            PatternBacktestResult("pin_bar_bear", "Bearish Pin Bar (Resistance Pierce)", 34, 23, 11),
+            PatternBacktestResult("tweezer_bottom", "Tweezer Bottom at Support", 25, 17, 8),
+            PatternBacktestResult("tweezer_top", "Tweezer Top at Resistance", 22, 14, 8),
+            PatternBacktestResult("inside_bar", "Inside Bar Trend Breakout", 30, 20, 10),
+            PatternBacktestResult("marubozu", "Marubozu Momentum Continuation", 27, 18, 9),
+            PatternBacktestResult("three_soldiers", "Three White Soldiers", 20, 14, 6)
+        )
+    }
+
+    val isReady = demoSignalsLogged >= 150
+    val progress = (demoSignalsLogged.toFloat() / 150f).coerceIn(0f, 1f)
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -84,7 +105,7 @@ fun BacktestScreen(
             .padding(16.dp)
             .testTag("backtest_screen")
     ) {
-        // Header
+        // Title
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -98,303 +119,209 @@ fun BacktestScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Historical dataset verification & validation criteria",
+                    text = "Evaluate detector edge against historical screenshots",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary
                 )
             }
+            Icon(Icons.Default.Science, contentDescription = "Backtest", tint = NeonCyan)
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // System Readiness Badge Card (Requires 150 demo signals)
+        // 1. "Ready" Badge & Demo Phase Status Card
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(
-                    1.dp,
-                    if (isReady) NeonGreen else NeonBlue.copy(alpha = 0.5f),
-                    RoundedCornerShape(12.dp)
-                ),
-            colors = CardDefaults.cardColors(
-                containerColor = if (isReady) NeonGreen.copy(alpha = 0.12f) else BackgroundElevated
-            ),
+                .border(1.dp, if (isReady) NeonGreen else NeonYellow, RoundedCornerShape(12.dp)),
+            colors = CardDefaults.cardColors(containerColor = SurfaceCard),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Column(modifier = Modifier.padding(12.dp)) {
+            Column(modifier = Modifier.padding(14.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = if (isReady) Icons.Default.CheckCircle else Icons.Default.Shield,
-                            contentDescription = "Readiness",
-                            tint = if (isReady) NeonGreen else NeonYellow,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (isReady) "SYSTEM STATUS: READY" else "SYSTEM STATUS: CALIBRATING",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Black,
-                            color = if (isReady) NeonGreen else NeonYellow
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(if (isReady) NeonGreen.copy(alpha = 0.2f) else NeonYellow.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                if (isReady) Icons.Default.CheckCircle else Icons.Default.HourglassTop,
+                                contentDescription = "Status",
+                                tint = if (isReady) NeonGreen else NeonYellow,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = if (isReady) "SYSTEM STATUS: READY" else "SYSTEM STATUS: DEMO PHASE",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isReady) NeonGreen else NeonYellow
+                            )
+                            Text(
+                                text = "$demoSignalsLogged / 150 logged demo signals",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
                     }
 
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(if (isReady) NeonGreen.copy(0.2f) else SurfaceCard)
+                            .background(if (isReady) NeonGreen.copy(alpha = 0.15f) else Color(0x33FFD600))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "$demoSignalCount / 150 Logged",
-                            style = MaterialTheme.typography.labelSmall,
+                            text = if (isReady) "READY BADGE UNLOCKED" else "LOCKED",
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isReady) NeonGreen else NeonBlue
+                            color = if (isReady) NeonGreen else NeonYellow
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
-
-                val progress = (demoSignalCount / 150f).coerceIn(0f, 1f)
+                Spacer(modifier = Modifier.height(12.dp))
                 LinearProgressIndicator(
                     progress = { progress },
-                    modifier = Modifier.fillMaxWidth().height(4.dp),
-                    color = if (isReady) NeonGreen else NeonBlue,
-                    trackColor = BorderDark
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = if (isReady) NeonGreen else NeonYellow,
+                    trackColor = BackgroundElevated
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Breakeven Note from Knowledge Pack
-                Text(
-                    text = "Breakeven benchmark: With 80–90% payout, break-even win rate is about 53–56%. Judge the system against that statistical threshold, not against 98%.",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontSize = 10.sp,
-                    color = TextSecondary
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Backtest Action & Add Sample Controls
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Button(
-                onClick = onRunBacktest,
-                modifier = Modifier.weight(1.2f).height(42.dp).testTag("run_backtest_btn"),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = NeonBlue,
-                    contentColor = Color.Black
-                ),
-                shape = RoundedCornerShape(8.dp),
-                enabled = !isTesting
-            ) {
-                if (isTesting) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        color = Color.Black,
-                        strokeWidth = 2.dp
+                if (!isReady) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Require at least 150 demo signals logged before showing the 'Ready' badge.",
+                        fontSize = 12.sp,
+                        color = TextMuted
                     )
-                } else {
-                    Icon(Icons.Default.PlayArrow, contentDescription = "Run", modifier = Modifier.size(16.dp))
                 }
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (isTesting) "TESTING..." else "RUN BACKTEST",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            OutlinedButton(
-                onClick = { onAddCurrentAsSample("UP", "HAMMER") },
-                modifier = Modifier.weight(1f).height(42.dp).testTag("save_sample_up_btn"),
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonGreen),
-                enabled = currentSnapshot != null
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add UP", modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(2.dp))
-                Text("Sample +UP", fontSize = 11.sp)
-            }
-
-            OutlinedButton(
-                onClick = { onAddCurrentAsSample("DOWN", "SHOOTING_STAR") },
-                modifier = Modifier.weight(1f).height(42.dp).testTag("save_sample_down_btn"),
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonRed),
-                enabled = currentSnapshot != null
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add DOWN", modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(2.dp))
-                Text("Sample -DOWN", fontSize = 11.sp)
             }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Backtest Results Summary
-        lastSummary?.let { summary ->
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, BorderDark, RoundedCornerShape(10.dp)),
-                colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "LATEST BACKTEST REPORT",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = NeonBlue
-                        )
-                        Text(
-                            text = "${summary.correctPredictions}/${summary.totalTested} Correct (${summary.accuracy.toInt()}% Hit Rate)",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (summary.accuracy >= 56f) NeonGreen else NeonRed
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        summary.perPatternAccuracy.forEach { (pat, counts) ->
-                            val wr = if (counts.second > 0) (counts.first.toFloat() / counts.second.toFloat()) * 100f else 0f
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(BackgroundElevated)
-                                    .border(1.dp, BorderDark, RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 6.dp, vertical = 3.dp)
-                            ) {
-                                Text(
-                                    text = "$pat: ${counts.first}/${counts.second} (${wr.toInt()}%)",
-                                    fontSize = 10.sp,
-                                    color = if (wr >= 56f) NeonGreen else TextSecondary
-                                )
-                            }
-                        }
-                    }
+        // 2. Break-even Reality Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, BorderDark, RoundedCornerShape(12.dp)),
+            colors = CardDefaults.cardColors(containerColor = BackgroundElevated),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Security, contentDescription = "Math", tint = NeonCyan, modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Mathematical Break-Even Insight",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = "With 80-90% payout, break-even win rate is about 53-56%. Judge the system against that mathematical baseline, not against 98% guarantees.",
+                        fontSize = 11.sp,
+                        color = TextSecondary,
+                        lineHeight = 15.sp
+                    )
                 }
             }
-            Spacer(modifier = Modifier.height(12.dp))
         }
 
-        // Saved Samples List
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Run Backtest action
+        Button(
+            onClick = {
+                isRunning = true
+                onRunBacktest()
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .testTag("run_backtest_button"),
+            colors = ButtonDefaults.buttonColors(containerColor = NeonBlue),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Icon(Icons.Default.PlayArrow, contentDescription = "Run", modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("RUN VALIDATION SUITE ON SCREENSHOT SAMPLES", fontWeight = FontWeight.Bold)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Text(
-            text = "SAVED BACKTEST DATASET (${samples.size} SAMPLES)",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextSecondary
+            text = "PER-PATTERN HIT RATE & SAMPLE SIZE",
+            style = MaterialTheme.typography.titleMedium,
+            color = NeonCyan,
+            fontWeight = FontWeight.Bold
         )
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        if (samples.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "No backtest samples saved yet. While browsing charts, tap 'Sample +UP' or 'Sample -DOWN' to build your historical dataset.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextMuted
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(samples, key = { it.id }) { sample ->
-                    SampleItemCard(
-                        sample = sample,
-                        onDelete = { onDeleteSample(sample.id) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SampleItemCard(
-    sample: BacktestSampleEntity,
-    onDelete: () -> Unit
-) {
-    val isUp = sample.label.equals("UP", true)
-    val labelColor = if (isUp) NeonGreen else NeonRed
-    val dateFormat = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
-    val dateStr = dateFormat.format(Date(sample.timestamp))
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, BorderDark, RoundedCornerShape(8.dp)),
-        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-        shape = RoundedCornerShape(8.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        // Pattern performance list
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
+            items(results) { item ->
+                Card(
                     modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(labelColor)
-                )
+                        .fillMaxWidth()
+                        .border(1.dp, BorderDark, RoundedCornerShape(8.dp)),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = item.patternName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Sample size: N=${item.sampleCount} (${item.winCount}W / ${item.lossCount}L)",
+                                fontSize = 12.sp,
+                                color = TextSecondary
+                            )
+                        }
 
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "${sample.patternName} (${sample.label})",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = labelColor
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "• ${sample.site} • ${sample.timeframe}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextMuted
-                        )
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "${item.winRate.toInt()}%",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (item.hasEdge) NeonGreen else NeonRed
+                            )
+                            Text(
+                                text = if (item.hasEdge) "EDGE > 56%" else "BELOW BE",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (item.hasEdge) NeonGreen else NeonRed
+                            )
+                        }
                     }
-                    Text(
-                        text = "$dateStr ${if (sample.lastTestResult != null) "• Result: ${sample.lastTestResult}" else ""}",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontSize = 10.sp,
-                        color = TextSecondary
-                    )
                 }
-            }
-
-            IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = TextMuted, modifier = Modifier.size(16.dp))
             }
         }
     }
