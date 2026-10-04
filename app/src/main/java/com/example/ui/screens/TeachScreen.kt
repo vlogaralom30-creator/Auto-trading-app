@@ -14,11 +14,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -27,10 +29,12 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +48,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.entity.RuleEntity
+import com.example.engine.CandleExtractor
+import com.example.engine.ColorCalibrator
 import com.example.ui.theme.BackgroundDark
 import com.example.ui.theme.BorderDark
 import com.example.ui.theme.NeonBlue
@@ -63,10 +69,42 @@ fun TeachScreen(
     BackHandler { onNavigateBack() }
 
     var ruleName by remember { mutableStateOf("") }
-    var patternType by remember { mutableStateOf("CUSTOM") }
+    var patternType by remember { mutableStateOf("HAMMER") }
     var requiredTrend by remember { mutableStateOf("ANY") }
     var outcome by remember { mutableStateOf("UP") }
     var notes by remember { mutableStateOf("") }
+    var detectedInsight by remember { mutableStateOf<String?>(null) }
+
+    // Auto-extract features from snapshot if present
+    LaunchedEffect(snapshotBitmap) {
+        if (snapshotBitmap != null) {
+            val candles = CandleExtractor.extractCandles(snapshotBitmap)
+            if (candles.isNotEmpty()) {
+                val lastCandle = candles.last()
+                val isBull = lastCandle.isBullish
+                outcome = if (isBull) "UP" else "DOWN"
+                
+                if (lastCandle.lowerWick > lastCandle.bodyHeight * 1.8f) {
+                    patternType = "HAMMER"
+                    ruleName = "Support Hammer Reversal"
+                    detectedInsight = "Detected long lower rejection wick (Hammer Setup)"
+                } else if (lastCandle.upperWick > lastCandle.bodyHeight * 1.8f) {
+                    patternType = "SHOOTING_STAR"
+                    ruleName = "Resistance Shooting Star Reversal"
+                    outcome = "DOWN"
+                    detectedInsight = "Detected long upper rejection wick (Shooting Star Setup)"
+                } else if (lastCandle.bodyRatio > 0.75f) {
+                    patternType = "ENGULFING"
+                    ruleName = if (isBull) "Bullish Momentum Engulfing" else "Bearish Momentum Engulfing"
+                    detectedInsight = "Detected strong momentum body (${(lastCandle.bodyRatio * 100).toInt()}% body ratio)"
+                } else {
+                    patternType = "CUSTOM"
+                    ruleName = "Price Action Reaction"
+                    detectedInsight = "Captured ${candles.size} candles from chart viewport"
+                }
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -101,7 +139,7 @@ fun TeachScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(200.dp)
+                    .height(180.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .border(1.dp, BorderDark, RoundedCornerShape(12.dp)),
                 colors = CardDefaults.cardColors(containerColor = SurfaceCard)
@@ -112,7 +150,29 @@ fun TeachScreen(
                     modifier = Modifier.fillMaxSize()
                 )
             }
-            Spacer(modifier = Modifier.height(16.dp))
+            
+            if (detectedInsight != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = "AI Insight",
+                        tint = NeonCyan,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = detectedInsight ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NeonCyan,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
         }
 
         Card(
@@ -147,7 +207,7 @@ fun TeachScreen(
                 OutlinedTextField(
                     value = patternType,
                     onValueChange = { patternType = it },
-                    label = { Text("Pattern Type (e.g. HAMMER, ENGULFING, PIN_BAR, CUSTOM)") },
+                    label = { Text("Pattern Type (HAMMER, ENGULFING, PIN_BAR, CUSTOM)") },
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = TextPrimary,

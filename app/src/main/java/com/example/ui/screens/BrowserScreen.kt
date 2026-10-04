@@ -424,8 +424,8 @@ fun BrowserScreen(
                 .pointerInput(Unit) {
                     detectDragGestures { change, dragAmount ->
                         change.consume()
-                        floatingOffsetX += dragAmount.x
-                        floatingOffsetY += dragAmount.y
+                        floatingOffsetX = (floatingOffsetX + dragAmount.x).coerceIn(-400f, 20f)
+                        floatingOffsetY = (floatingOffsetY + dragAmount.y).coerceIn(-500f, 20f)
                     }
                 }
         ) {

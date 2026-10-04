@@ -22,22 +22,40 @@ object WebViewChartController {
         selectorTemplate: String
     ): Boolean = suspendCancellableCoroutine { continuation ->
         val resolvedSelector = selectorTemplate.replace("{tf}", timeframe)
+        val cleanTf = timeframe.replace("m", "").trim()
         val js = """
             (function() {
                 var tf = '$timeframe';
-                // Try configured selector template
-                var el = document.querySelector('$resolvedSelector');
-                if (el) { el.click(); return 'SUCCESS_CUSTOM'; }
+                var cleanTf = '$cleanTf';
                 
-                // Fallback smart heuristics for TradingView / Quotex / Exness
-                var buttons = Array.from(document.querySelectorAll('button, div[role="button"], span, div'));
+                // 1. Try configured user/site profile selector template
+                try {
+                    var el = document.querySelector('$resolvedSelector');
+                    if (el) { el.click(); return 'SUCCESS_CUSTOM'; }
+                } catch(e) {}
+                
+                // 2. TradingView Specific interval buttons & header items
+                try {
+                    var tvBtn = document.querySelector('[data-value="' + cleanTf + '"], [value="' + cleanTf + '"], #header-toolbar-intervals');
+                    if (tvBtn) { tvBtn.click(); return 'SUCCESS_TV'; }
+                } catch(e) {}
+
+                // 3. Fallback smart heuristics for Quotex / Exness / Binance / PocketOption
+                var buttons = Array.from(document.querySelectorAll('button, div[role="button"], span, div, a'));
                 var match = buttons.find(function(b) {
-                    var txt = (b.textContent || '').trim();
-                    var aria = (b.getAttribute('aria-label') || '').trim();
-                    var val = (b.getAttribute('data-value') || '').trim();
-                    return txt === tf || aria.indexOf(tf) !== -1 || val === tf;
+                    var txt = (b.textContent || '').trim().toLowerCase();
+                    var aria = (b.getAttribute('aria-label') || '').trim().toLowerCase();
+                    var val = (b.getAttribute('data-value') || '').trim().toLowerCase();
+                    var id = (b.id || '').toLowerCase();
+                    return txt === tf.toLowerCase() || txt === cleanTf || 
+                           aria.indexOf(tf.toLowerCase()) !== -1 || 
+                           val === tf.toLowerCase() || val === cleanTf ||
+                           id.indexOf('timeframe-' + cleanTf) !== -1;
                 });
-                if (match) { match.click(); return 'SUCCESS_HEURISTIC'; }
+                if (match) { 
+                    match.click(); 
+                    return 'SUCCESS_HEURISTIC'; 
+                }
                 return 'NOT_FOUND';
             })();
         """.trimIndent()
@@ -52,7 +70,7 @@ object WebViewChartController {
 
     suspend fun fitChartZoom(webView: WebView, zoomMethod: String) {
         if (zoomMethod.contains("wheel", ignoreCase = true)) {
-            // Dispatch JS Wheel Event on Canvas
+            // Dispatch JS Wheel Event on Chart Canvas
             val js = """
                 (function() {
                     var canvas = document.querySelector('canvas') || document.body;
@@ -69,7 +87,6 @@ object WebViewChartController {
             """.trimIndent()
             webView.evaluateJavascript(js, null)
         } else {
-            // Dispatch native touch pinch sequence
             dispatchPinchGesture(webView)
         }
     }
@@ -80,7 +97,6 @@ object WebViewChartController {
         val centerX = webView.width / 2f
         val centerY = webView.height / 2f
 
-        // Synthesize single tap / touch gesture to focus chart canvas
         val downEvent = MotionEvent.obtain(downTime, eventTime, MotionEvent.ACTION_DOWN, centerX, centerY, 0)
         val upEvent = MotionEvent.obtain(downTime, eventTime + 50, MotionEvent.ACTION_UP, centerX, centerY, 0)
         webView.dispatchTouchEvent(downEvent)

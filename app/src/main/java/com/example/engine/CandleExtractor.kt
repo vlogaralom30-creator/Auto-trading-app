@@ -36,15 +36,12 @@ object CandleExtractor {
         val startX = (width * 0.03f).toInt()
         val endX = (width * 0.95f).toInt()
 
-        val sampleStepX = maxOf(1, width / 600)
-        val sampleStepY = maxOf(1, height / 500)
+        val sampleStepX = maxOf(1, width / 700)
+        val sampleStepY = maxOf(1, height / 600)
 
-        // Read pixel buffer in chunks for memory efficiency
-        val pixels = IntArray(width)
         val activeRuns = mutableListOf<ColumnRun>()
 
         for (x in startX until endX step sampleStepX) {
-            // Read single column if possible or fetch row-wise
             var greenCount = 0
             var redCount = 0
             var minY = Float.MAX_VALUE
@@ -68,7 +65,7 @@ object CandleExtractor {
             }
 
             val totalCandlePixels = greenCount + redCount
-            if (totalCandlePixels >= 5 && (maxY - minY) >= 6f) {
+            if (totalCandlePixels >= 4 && (maxY - minY) >= 5f) {
                 val isBullish = greenCount >= redCount
                 activeRuns.add(
                     ColumnRun(
@@ -92,7 +89,7 @@ object CandleExtractor {
         val candleGroups = mutableListOf<MutableList<ColumnRun>>()
         var currentGroup = mutableListOf<ColumnRun>()
 
-        val maxGap = maxOf(6, (width * 0.025f).toInt())
+        val maxGap = maxOf(5, (width * 0.025f).toInt())
 
         for (run in activeRuns) {
             if (currentGroup.isEmpty()) {
@@ -114,7 +111,7 @@ object CandleExtractor {
             candleGroups.add(currentGroup)
         }
 
-        if (candleGroups.size < 4) {
+        if (candleGroups.size < 6) {
             return generateDemoCandles(width.toFloat(), height.toFloat())
         }
 
@@ -131,7 +128,7 @@ object CandleExtractor {
 
             // Estimate body vs wick based on column pixel density
             val totalHeight = overallMaxY - overallMinY
-            val bodyHeight = maxOf(totalHeight * 0.6f, 4f)
+            val bodyHeight = maxOf(totalHeight * 0.65f, 4f)
             val wickEstimate = (totalHeight - bodyHeight) / 2f
 
             val highY = overallMinY
@@ -167,27 +164,30 @@ object CandleExtractor {
     }
 
     /**
-     * Generates a realistic candlestick series for instant testing & calibration.
+     * Generates a realistic candlestick series (45+ candles) for instant testing & calibration.
      */
     fun generateDemoCandles(width: Float, height: Float): List<Candle> {
-        val candleCount = 24
-        val startX = width * 0.08f
-        val endX = width * 0.92f
+        val candleCount = 45
+        val startX = width * 0.05f
+        val endX = width * 0.95f
         val spacing = (endX - startX) / candleCount
-        val candleWidth = spacing * 0.65f
+        val candleWidth = maxOf(4f, spacing * 0.65f)
 
-        val basePriceY = height * 0.52f
+        val basePriceY = height * 0.50f
         val candles = mutableListOf<Candle>()
 
         var currentPriceY = basePriceY
-        val randomWalks = listOf(
-            -18f, -22f, 15f, -25f, -10f, 20f, 18f, -12f,
-            30f, 25f, -15f, -20f, -35f, 15f, -10f, -40f,
-            -25f, 30f, 45f, 20f, 35f, -15f, 40f, 50f
+        val deltas = listOf(
+            -8f, -12f, 10f, -15f, -8f, 14f, 12f, -10f,
+            20f, 18f, -12f, -15f, -22f, 12f, -8f, -25f,
+            -18f, 22f, 30f, 15f, 24f, -10f, 28f, 32f,
+            -14f, -16f, 8f, 20f, -12f, 18f, 22f, -15f,
+            -20f, 16f, 24f, 18f, -10f, 26f, 20f, 14f,
+            -12f, 22f, 30f, 28f, 35f
         )
 
         for (i in 0 until candleCount) {
-            val delta = randomWalks.getOrElse(i) { (i % 2 * 20 - 10).toFloat() }
+            val delta = deltas.getOrElse(i) { if (i % 2 == 0) 15f else -10f }
             val centerX = startX + i * spacing
             val isBullish = delta > 0 // delta > 0 means price went UP, so Y goes DOWN in screen coords
 
@@ -198,23 +198,24 @@ object CandleExtractor {
             val bodyTop = minOf(openY, closeY)
             val bodyBottom = maxOf(openY, closeY)
 
-            // Special patterns injected at key indices for demonstration:
-            // Index 16: Bullish Hammer at support
-            val isHammerIndex = (i == 16)
-            val isEngulfingIndex = (i == 22)
+            // Inject special key patterns for testing:
+            // Index 38: Bullish Pin Bar / Hammer
+            // Index 43: Bullish Engulfing
+            val isHammerIndex = (i == 38)
+            val isEngulfingIndex = (i == 43)
 
             val highY: Float
             val lowY: Float
 
             if (isHammerIndex) {
                 highY = bodyTop - 3f
-                lowY = bodyBottom + 45f // Long lower wick
+                lowY = bodyBottom + 35f // Long lower rejection wick
             } else if (isEngulfingIndex) {
-                highY = bodyTop - 12f
-                lowY = bodyBottom + 12f
+                highY = bodyTop - 10f
+                lowY = bodyBottom + 10f
             } else {
-                highY = bodyTop - (10f + (i % 5) * 3f)
-                lowY = bodyBottom + (10f + (i % 4) * 4f)
+                highY = bodyTop - (6f + (i % 4) * 2.5f)
+                lowY = bodyBottom + (6f + (i % 3) * 3f)
             }
 
             currentPriceY = closeY

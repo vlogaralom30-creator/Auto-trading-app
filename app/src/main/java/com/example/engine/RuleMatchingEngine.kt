@@ -272,9 +272,16 @@ object RuleMatchingEngine {
             if (rule.requireNearSupport && !isNearSupport) continue
             if (rule.requireNearResistance && !isNearResistance) continue
 
+            val totalTrades = rule.winCount + rule.lossCount
             val ruleSign = if (rule.outcome.equals("UP", true)) 1f else -1f
-            val ruleWeight = rule.weight.coerceIn(0.05f, 0.20f)
-            taughtScore += (ruleSign * ruleWeight)
+            // Knowledge Pack calibration: When >=30 journal results, replace prior weight with measured win rate
+            val effectiveWeight = if (totalTrades >= 30) {
+                val winRate = rule.winCount.toFloat() / totalTrades.toFloat()
+                (winRate * 0.25f).coerceIn(0.05f, 0.25f)
+            } else {
+                rule.weight.coerceIn(0.05f, 0.20f)
+            }
+            taughtScore += (ruleSign * effectiveWeight)
             contributingRules.add(rule.name)
         }
 
